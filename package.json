@@ -6,7 +6,8 @@
   "license": "MIT",
   "workspaces": [
     "plugins/*",
-    "tools/*"
+    "tools/*",
+    "tests"
   ],
   "scripts": {
     "validate": "nx run-many -t validate",

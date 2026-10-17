@@ -1,11 +1,10 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { validatePlugin, type PluginContext } from "./plugin";
+import { listSkillDirs } from "./skills";
+import { isDict, type Dict, type Finding } from "./types";
 
-export interface Finding {
-  rule: string;
-  path: string;
-  message: string;
-}
+export type { Finding } from "./types";
 
 // OMP marketplace and plugin names: ASCII letters, digits, hyphens and dots,
 // starting and ending with a letter or digit, at most 64 characters.
@@ -14,12 +13,6 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
 
 const UPSTREAM_COPYRIGHT = "Copyright (c) 2025 lexykwaii";
-
-type Dict = Record<string, unknown>;
-
-function isDict(value: unknown): value is Dict {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function readJson(root: string, rel: string): { value: unknown } | { error: string } {
   try {
@@ -90,7 +83,7 @@ export function checkMarketplace(root: string): Finding[] {
   return findings;
 }
 
-/** `skills.manifest.json`: provenance of every vendored or derived skill. */
+/** `skills.manifest.json`: provenance and size budget of every vendored or authored skill. */
 export function checkSkillsManifest(root: string): Finding[] {
   const rel = "skills.manifest.json";
   if (!existsSync(join(root, rel))) {
@@ -115,14 +108,24 @@ export function checkSkillsManifest(root: string): Finding[] {
     add("manifest-skills", "`skills` must be an array");
     return findings;
   }
+  const seenPaths = new Set<string>();
   manifest.skills.forEach((skill: unknown, index: number) => {
     const where = `skills[${index}]`;
     if (!isDict(skill)) return add("manifest-skills", `${where} must be an object`);
     if (typeof skill.name !== "string" || !/^is-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill.name)) {
       add("manifest-skills", `${where}.name must start with \`is-\` and be lowercase kebab-case`);
     }
-    if (typeof skill.path !== "string" || !isDir(root, skill.path)) add("manifest-skills", `${where}.path must be an existing directory`);
+    if (typeof skill.path !== "string" || !isDir(root, skill.path)) {
+      add("manifest-skills", `${where}.path must be an existing directory`);
+    } else {
+      if (seenPaths.has(skill.path)) add("manifest-skills", `${where}.path \`${skill.path}\` is listed twice`);
+      seenPaths.add(skill.path);
+      if (skill.name !== skill.path.split("/").pop()) add("manifest-skills", `${where}.name must equal the last segment of its path`);
+    }
     if (typeof skill.modified !== "boolean") add("manifest-skills", `${where}.modified must be a boolean`);
+    if (typeof skill.budgetBytes !== "number" || !Number.isInteger(skill.budgetBytes) || skill.budgetBytes <= 0) {
+      add("manifest-skills", `${where}.budgetBytes must be a positive integer (the SKILL.md size target)`);
+    }
     if (skill.origin !== "upstream" && skill.origin !== "authored") add("manifest-skills", `${where}.origin must be \`upstream\` or \`authored\``);
     if (skill.origin === "upstream" && !(Array.isArray(skill.from) && skill.from.length > 0 && skill.from.every((s: unknown) => typeof s === "string"))) {
       add("manifest-skills", `${where}.from must list the upstream skill names it derives from`);
@@ -150,6 +153,40 @@ export function checkNotices(root: string): Finding[] {
   return findings;
 }
 
-export function validateRepo(root: string): Finding[] {
-  return [...checkMarketplace(root), ...checkSkillsManifest(root), ...checkNotices(root)];
+/** Plugin directories listed by the marketplace catalog (repo-relative). */
+function catalogPluginDirs(root: string): string[] {
+  const parsed = existsSync(join(root, ".omp-plugin/marketplace.json")) ? readJson(root, ".omp-plugin/marketplace.json") : undefined;
+  if (!parsed || "error" in parsed || !isDict(parsed.value) || !Array.isArray(parsed.value.plugins)) return [];
+  return parsed.value.plugins
+    .filter((plugin: unknown): plugin is Dict & { source: string } => isDict(plugin) && typeof plugin.source === "string" && plugin.source.startsWith("./"))
+    .map((plugin: { source: string }) => plugin.source.slice(2))
+    .filter((dir: string) => isDir(root, dir));
+}
+
+function pluginContext(root: string): PluginContext {
+  const knownSkills = new Set<string>();
+  if (isDir(root, "plugins")) {
+    for (const plugin of readdirSync(join(root, "plugins"))) for (const skill of listSkillDirs(root, `plugins/${plugin}`)) knownSkills.add(skill);
+  }
+  const manifestSkills = new Map<string, { budgetBytes: number | undefined }>();
+  const manifest = existsSync(join(root, "skills.manifest.json")) ? readJson(root, "skills.manifest.json") : undefined;
+  if (manifest && "value" in manifest && isDict(manifest.value) && Array.isArray(manifest.value.skills)) {
+    for (const skill of manifest.value.skills) {
+      if (isDict(skill) && typeof skill.path === "string") {
+        manifestSkills.set(skill.path, { budgetBytes: typeof skill.budgetBytes === "number" ? skill.budgetBytes : undefined });
+      }
+    }
+  }
+  return { knownSkills, manifestSkills };
+}
+
+/**
+ * Validate the repository. With `options.plugin` (a repo-relative plugin directory) only that
+ * plugin is checked; this is what each plugin's Nx `validate` target runs.
+ */
+export function validateRepo(root: string, options: { plugin?: string } = {}): Finding[] {
+  const ctx = pluginContext(root);
+  if (options.plugin !== undefined) return validatePlugin(root, options.plugin, ctx);
+  const plugins = catalogPluginDirs(root).flatMap((dir) => validatePlugin(root, dir, ctx));
+  return [...checkMarketplace(root), ...checkSkillsManifest(root), ...checkNotices(root), ...plugins];
 }

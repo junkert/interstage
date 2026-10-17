@@ -1,0 +1,18 @@
+{
+  "name": "@interstage/tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typechecks plugin extensions and holds their unit tests, kept outside the shipped plugin directories.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "nx": {
+    "implicitDependencies": ["interstage"],
+    "targets": {
+      "typecheck": {
+        "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/plugins/*/extension/**/*", "{workspaceRoot}/tsconfig.base.json"]
+      }
+    }
+  }
+}

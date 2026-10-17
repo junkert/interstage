@@ -1,0 +1,19 @@
+{
+  "name": "interstage",
+  "owner": { "name": "Levi Junkert" },
+  "metadata": {
+    "description": "Interstage: agents and skills for building software with OMP",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "interstage",
+      "description": "Core: CAPCOM, Houston, Flight and the specialist agents, with the core skills and Context7",
+      "source": "./plugins/interstage",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": ["agents", "orchestration", "software-delivery"],
+      "license": "MIT"
+    }
+  ]
+}

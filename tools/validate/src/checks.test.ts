@@ -107,6 +107,18 @@ describe("checkSkillsManifest", () => {
     expect(found.map((finding) => finding.message).join("\n")).toContain("`is-`");
     expect(found.map((finding) => finding.message).join("\n")).toContain("upstream skill names");
   });
+  test("requires a size budget, a name that matches its path, and no duplicate paths", () => {
+    put("plugins/interstage/skills/is-a/SKILL.md", "x");
+    const entry = { name: "is-a", path: "plugins/interstage/skills/is-a", origin: "authored", modified: false };
+    put("skills.manifest.json", {
+      upstream: { repo: "https://github.com/wojons/skills", sha: SHA, license: "MIT" },
+      skills: [entry, { ...entry, name: "is-b", budgetBytes: 100 }],
+    });
+    const messages = checkSkillsManifest(root).map((finding) => finding.message);
+    expect(messages.some((message) => message.includes("budgetBytes"))).toBe(true);
+    expect(messages.some((message) => message.includes("listed twice"))).toBe(true);
+    expect(messages.some((message) => message.includes("last segment"))).toBe(true);
+  });
 });
 
 describe("checkNotices", () => {

@@ -175,12 +175,12 @@ Order matters only where a phase lists a dependency.
 |---|---|---|---|
 | **0 Foundation** | New `.gitignore` (node_modules, dist, `*.log`, `.DS_Store`, `.env*`, coverage output, `.interstage/`), root `package.json` (Bun workspaces: `plugins/*`, `tools/*`), `nx.json` (pinned Nx, caching for `validate`, `typecheck`, `test`, `shellcheck`, no Nx Cloud), `tsconfig.json`, CI workflow using `nx affected`, `CONTRIBUTING.md`, `THIRD_PARTY_NOTICES.md` scaffold, `skills.manifest.json` with the upstream SHA recorded | CI green on an empty skeleton on macOS and Linux; `nx run-many -t validate` works | none |
 | **1 Spikes** | S1 to S10 (below), results added to DESIGN | Each spike has a recorded pass or fail; failures change the plan before Phase 3 | 0 |
-| **2 Skeleton** | `marketplace.json`, core and pack manifests, empty extension that registers the flag, validator v1, `install.sh` stub | Local `omp plugin marketplace add` and `install --dry-run` succeed; validator passes on the skeleton | 0, 1 (S7) |
+| **2 Skeleton** | `marketplace.json` listing core only; core plugin manifest, `.mcp.json` and an extension that registers the flag; validator v1 (frontmatter, agent, skill, MCP, lint and TODO rules, per-plugin mode); a `tests` workspace that typechecks the extension. Pack plugins are created in Phase 6 with a pack generator so no empty plugin is ever listed | Local `omp plugin marketplace add` and `install --dry-run` succeed; a real install is accepted and `omp --interstage` runs; validator passes | 0, 1 (S7) |
 | **3 Extension** | Pure modules with unit tests, then adapters, then commands | Unit tests cover gates, budget, breaker, severity, lanes, state transitions, config merge, `init` idempotency; headless run shows persona, overrides, hidden agents without the flag | 1, 2 |
 | **4 Agents** | Persona, Houston, Flight (with loop spec, steering reference), then the 13 specialist files | Validator passes; headless fast-lane smoke on a fixture produces a commit `T-001: ...` on a mission branch | 2, 3 |
 | **5 Core skills** | Batches B1 to B5 (below) | Validator passes; each skill reviewed independently; manifest complete | 2 (validator) |
 | **6 Packs** | observability (3), web (1), data (4), ops (1), forge (1 + validator wrapper) | Same as core skills; packs install independently | 5 |
-| **7 Install and docs** | `install.sh`, README (install, quickstart), `USAGE.md`, `AUTHORING.md`, CHANGELOG | A clean-machine install follows the README verbatim; `install.sh --packs web,data` works | 3, 6 |
+| **7 Install and docs** | `install.sh` (real, written here rather than stubbed earlier), README (install, quickstart), `USAGE.md`, `AUTHORING.md`, CHANGELOG | A clean-machine install follows the README verbatim; `install.sh --packs web,data` works | 3, 6 |
 | **8 Hardening and release** | End-to-end runs (fast lane; standard lane with a 3-item parallel TODO; pause and resume; circuit breaker; abort; conflict handling), dogfood on a small real project, fix list, tag `v0.1.0` | All acceptance criteria in section 1 | all |
 
 Skill batches (Phase 5):
@@ -215,7 +215,7 @@ Details are in DESIGN "Phase 1 spike results". Summary:
 1. Agent files use role fallbacks (`@role, @default`). Validator rule: every agent `model` ends with `@default`.
 2. The extension exports `INTERSTAGE_STATE_DIR` (absolute) from the main session; all mission and usage writes use it. Builders return evidence in task output; Flight writes it.
 3. The extension sets `task.isolation.apply=false`. Flight integrates retained branches in dependency order, one `git merge --no-ff` per verified item. Gate E is a `tool_call` gate on `git merge`; gate D a `tool_call` gate on installs and network calls.
-4. **Proposed integration-conflict policy (Phase 4):** a conflicting item is rebuilt on the updated mission branch by a fresh builder. That attempt counts against the item's 3-failure counter only if it fails verification; a conflict alone is not a failure. After 2 conflict rebuilds the item is `blocked` and CAPCOM is told.
+4. **Integration-conflict policy (approved):** a conflicting item is rebuilt on the updated mission branch by a fresh builder. That attempt counts against the item's 3-failure counter only if it fails verification; a conflict alone is not a failure. After 2 conflict rebuilds the item is `blocked` and CAPCOM is told.
 5. `mission` tool access is restricted to Houston and Flight (removal in `before_agent_start` plus a check in `execute`).
 6. The TypeScript validator owns TODO validation (`## T-ID` items with `depends`, `spec`, `done-when`). `validate-todo.sh` is not shipped.
 7. `/interstage:init` must `await` its config writes.

@@ -1,0 +1,13 @@
+{
+  "name": "interstage",
+  "version": "0.1.0",
+  "description": "Interstage core: CAPCOM-led multi-agent software delivery for OMP.",
+  "license": "MIT",
+  "type": "module",
+  "omp": {
+    "extensions": ["./extension/index.ts"]
+  },
+  "scripts": {
+    "validate": "bun run ../../tools/validate/src/cli.ts ../.. --plugin plugins/interstage"
+  }
+}
