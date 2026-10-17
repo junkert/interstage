@@ -80,36 +80,36 @@ Extension-registered: `/interstage:init`, `:launch`, `:status`, `:abort`, `:doct
 |---|---|---|
 | CAPCOM | User-facing project manager (main session) | |
 | Houston | Project orchestrator | |
-| Flight | Mission sub-orchestrator running the Ralph-style loop | Interstage-native loop prompt (derived from `ralph-wiggum-loop` and `ai-collab-dev`), `baby-steps` |
-| FIDO | Planner and architect | `exhaustive-specification`; on demand: `data-flow-architect` |
+| Flight | Mission sub-orchestrator running the loop in "Flight loop specification" | Interstage-native loop prompt (derived from `ralph-wiggum-loop` and `ai-collab-dev`); autoload `baby-steps` |
+| FIDO | Planner and architect; also the loop's planner | autoload `exhaustive-specification`; on demand `data-flow-architect` (data pack) |
 | Sojourner, Ingenuity | Read-only scouts (cheap and broad) | none; a scout handoff report format is part of the prompt |
 | Hubble | Research: libraries, docs, prior art (Context7) | `best-practice-guide` (trimmed, on demand) |
-| Perseverance | Long-running implementer (migrations, refactors) | `code-migration`, `dependency-upgrade`, `baby-steps` |
-| Curiosity | General implementer | `baby-steps` |
-| Go/No-Go | QA runner and gate | autoload: `test-pipeline`, `testing-expected-results`; on demand: `test-strategy`, `testing-integration`, `testing-e2e`, pack testing skills |
-| Orbiter | Integration, e2e and contract tests | autoload: `testing-integration`, `testing-e2e`; on demand: `testing-expected-results`, `test-pipeline` |
-| Inspector | Independent verifier and gap analyst | autoload: `completeness-validator`, `test-gap-analysis`, `testing-expected-results`; on demand: `trust-but-verify`, `reality-validation`, `gap-analysis`, `spec-gap-analysis` |
-| Kessler | Security review (static only: code, config, dependencies, threat models) | `redteam`, `white-hat`, `security-scan`, `testing-security`, without the upstream scripts |
-| Pogo | Devil's advocate on plans, specs and assumptions | `devils-advocate`, `assumption-buster`, `assumption-testing`, `adversarial-thinking` |
-| Tiger Team | Debugging and incident response | `sherlock-debugging`, `stepwise-testing`; on demand: `incident-response`, `log-analysis-parsing` |
-| Booster | DevOps and CI | `git-release` |
-| Golden Record | Documentation | `api-documentation`, `index` (writes `_index.md` files into the repo only on explicit request) |
+| Perseverance | Long-running implementer (migrations, refactors) | autoload `migration`, `baby-steps` |
+| Curiosity | General implementer | autoload `baby-steps` |
+| Go/No-Go | QA runner and gate; verifier layers 1 and 5 (functional, integration) | autoload `test-pipeline`, `testing-expected-results`; on demand `test-strategy`, `testing-integration`, `testing-e2e`, pack testing skills |
+| Orbiter | Integration, e2e and contract tests | autoload `testing-integration`, `testing-e2e`; on demand `testing-expected-results`, `test-pipeline` |
+| Inspector | Independent verifier (layers 2-4: quality, spec compliance, edge cases) and gap analyst | autoload `verify-claims`, `test-gap-analysis`, `testing-expected-results`; on demand `spec-gap-analysis` |
+| Kessler | Security review (static only: code, config, dependencies, CI, Dockerfiles, IaC) | autoload `security-review`; on demand `threat-modeling` |
+| Pogo | Devil's advocate on plans, specs and assumptions | autoload `adversarial-review` |
+| Tiger Team | Debugging and post-mortems | autoload `sherlock-debugging`, `stepwise-testing`; on demand `log-analysis` (observability pack) |
+| Booster | DevOps, CI and release | autoload `git-release` |
+| Golden Record | Documentation | autoload `api-documentation`; on demand `index` (propose-only) |
 
-Skill names in the table are upstream names. In the repo each carries an `is-` prefix. Agents autoload 1-3 core skills and read the rest on demand.
+Skill names in the table are the Interstage names without the `is-` prefix; in the repo each directory and `name:` carries the prefix. Agents autoload 1-3 core skills and read the rest on demand. See "Remaining skill decisions" for what each absorbs.
 
 ### Packs
 
 | Pack | Skills |
 |---|---|
-| observability | `logging-fundamentals`, `logging-performance-optimization`, `log-management-system`, `log-analysis-parsing`, `distributed-tracing-logs`, `observability-logging` |
-| web | `react-review`, `accessibility-audit`, `testing-accessibility`, `vercel-deploy` |
-| data | `database-optimization`, `data-validation`, `data-flow-architect`, `testing-database` |
-| ops | `cloud-cost-optimization`, `performance-profiling`, `testing-performance` (with opt-in chaos), `dependency-upgrade`, `code-migration`, `incident-response` |
-| forge | `skill-builder`, `hypercognitive-skill-compiler`, `dogfooding` |
+| observability | `structured-logging`, `tracing-correlation`, `log-analysis` |
+| web | `web-review` |
+| data | `database-optimization`, `data-validation`, `testing-database`, `data-flow-architect` |
+| ops | `performance-profiling` (with `testing-performance`; chaos is opt-in) |
+| forge | `forge` (Interstage-authored) plus a validator script |
 
-Out of v1: `opencode-config`, `notebooklm-federated-specs`.
+Out of v1: `opencode-config`, `notebooklm-federated-specs`, and the skills listed under "Remaining skill decisions" as dropped.
 
-Some skills appear in both the core roster and a pack. The final placement is decided during skill adaptation.
+Agent prompts that point at a pack skill (for example FIDO and `data-flow-architect`, Tiger Team and `log-analysis`, Go/No-Go and the pack testing skills) read it only if it is installed. A missing pack skill is never an error.
 
 ## Mission lifecycle
 
@@ -158,6 +158,65 @@ CAPCOM sizes each request into a lane. The user can override the lane.
   When a Pogo loop hits its cap, it escalates to CAPCOM.
 
 Dropped from Ralph: Python runner, plugin system, DAG and saga engine, OTel, dashboard, Slack.
+
+### Flight loop specification
+
+Derived from the Ralph docs (`STEERING_PACKETS.md`, `PROMPT_ARCHITECTURE.md`, the three role prompts) and reconciled with the decisions above. Flight's agent prompt carries the loop. Specialists get their role from their own agent files, never from skills or root-level prompt files.
+
+**Prompt layering.** Identity and standing rules are static (the agent file). Per-iteration steering goes into the task assignment that Flight passes in each `task` spawn: active task (TODO-ID, iteration, number of previous attempts), context (spec reference, files changed, tests passing or failing), previous-attempt analysis (error, root cause, file:line), instructions (primary goal, specific requirements, success criteria), evidence (failing output), next steps. Never put the current task in a role prompt, and never put role identity in an assignment. Mission state lives in `.interstage/missions/<id>/`.
+
+**Roles in the loop.**
+
+| Role | Played by | Inputs | Output |
+|---|---|---|---|
+| Builder | Curiosity or Perseverance | One TODO item with success conditions, its SPEC section, project conventions, similar code | Files changed, tests added and results, notes. Stops after one item. Reports blockers and open questions to Flight; never edits the TODO or user docs |
+| Verifier, layers 1 and 5 | Go/No-Go | The item, its diff, the project's test command | Functional (tests pass, existing tests still pass, tests assert the right thing) and integration (build works, existing features, schema and API compatibility). Pass/fail only |
+| Verifier, layers 2-4 | Inspector | Same | Code quality, spec compliance, edge cases (empty and invalid inputs, boundaries, resource limits, concurrency, meaningful errors). Findings with evidence and severity |
+| Planner | FIDO | TODO, failure history, evidence, SPEC | Planning report: status, root cause, evidence, changes made, next steps, success criteria. Does not write code or verify |
+
+An item passes only when both verifiers report clean (zero blockers, zero majors). "Cannot verify" is reported as unverified with evidence and never counts as a pass. Only Flight updates the TODO and commits (`<TODO-ID>: <imperative title>`).
+
+**Failure and escalation policy.**
+
+- One failure = the builder fails or reports BLOCKED, or a verifier returns at least one blocker or major.
+- A failed item goes back to a fresh builder with the prior findings. After 3 failures on one item the planner revises the SPEC or TODO and that item's counter resets.
+- At most 2 planner rounds per item. After that the item is `blocked` and Flight tells CAPCOM.
+- The planner is also invoked on BLOCKED, on a strategic decision, on a redirect or reprioritize packet that changes the plan, and when an iteration produces no TODO state change and no commit. It is not invoked on every verifier rejection.
+- Planner solutions by root cause: ambiguous task (clarify), missing context (add context), technical blocker (split), wrong approach (alternative), missing dependency (reorder), spec gap (extend spec), environment issue (document the workaround in the mission decisions file), finding without evidence (dismiss with a stated reason). Split when a task has more than one behavior or more than one verification command.
+- Circuit breaker (gate G): 5 consecutive failures across the whole mission, counted in completion order. Any verified item resets it.
+
+**Item states:** `pending`, `building`, `verifying`, `failed`, `planning`, `done`, `blocked`. **Mission states:** `running`, `paused`, `halted`, `complete`, `aborted`.
+
+| # | Transition | Guard |
+|---|---|---|
+| 1 | pending -> building | All `depends:` done, a parallel slot is free (default 4), mission running, budget left |
+| 2 | building -> verifying | Builder reports done and its own tests pass |
+| 3 | building -> failed | Builder fails or reports BLOCKED |
+| 4 | verifying -> done | Both verifiers clean. Flight commits and ticks the item |
+| 5 | verifying -> failed | At least one blocker or major. Findings recorded |
+| 6 | failed -> building | Failure counter below 3 |
+| 7 | failed -> planning | Failure counter reached 3 |
+| 8 | planning -> pending | Planner revised SPEC or TODO. Counter resets |
+| 9 | planning -> blocked | Planner needs user input, or 2 planner rounds are used up. Flight reports to CAPCOM |
+| 10 | any -> halted | Circuit breaker |
+| 11 | running <-> paused | `pause` or `resume` packet, or a gate is waiting |
+| 12 | any -> aborted | `/interstage:abort` |
+
+**Steering packets.** CAPCOM or Flight writes small JSON files named `<seq>-<signal>.json` under `.interstage/missions/<id>/steering/`. Flight reads pending packets between items and applies them in `seq` order, interrupt and pause first, then moves each to `applied/` with a result. The extension blocks new spawns while the mission is paused or interrupted (`before_subagent_spawn`, verified). Running items finish. Killing a running subagent is out of scope for v1.
+
+| Field | Meaning |
+|---|---|
+| `version` | Packet schema version |
+| `seq` | Monotonic integer. Timestamps are stamped by the extension, never written by a model |
+| `signal` | `interrupt`, `redirect`, `pause`, `resume`, `reprioritize` (orchestrator to Flight); `decision` (an open question returned by a specialist); `error`; `complete` |
+| `context.current_task` | `id` (TODO-ID) and `spec_ref` |
+| `context.failure_history` | Entries with attempt number, error and a file:line or finding reference |
+| `evidence` | Files changed, test results, token use (feeds the budget) |
+| `instructions` | `primary`, `constraints[]`, `success_criteria[]`, `next_steps[]` (the payload of redirect and reprioritize) |
+
+Signal payloads: `interrupt` (`reason`, `preserve_context`), `redirect` (`new_phase`, `reason`, `keep_evidence`, and the artifact that owns the problem: spec, TODO or assignment), `pause` (`wait_for`), `resume` (`from_checkpoint`, a verified commit or state snapshot), `reprioritize` (`order: [TODO-IDs]`, optional `defer: [...]`; not an upstream signal, defined here), `decision` (`options`, `recommendation`), `error` (`error_type`, `recoverable`), `complete` (`success`, `artifacts`). Heartbeat, progress and checkpoint signals are dropped; they assume a runner.
+
+Dropped from the upstream loop: root-level `PROMPT.md`, `AGENTS.md`, `ralph.yaml` and `.ralph/` files; the HumanReview state and any auto-approve on timeout (humans enter only through CAPCOM at autonomy gates); metrics and tracing; the `Critical/Major/Minor` scale (replaced by blocker, major, minor, nit); "APPROVED for merge" verdicts; "adjust standards" as a planner solution; the human-time "takes more than 1 hour" split criterion.
 
 ## LSP and MCP
 
@@ -263,6 +322,59 @@ Policy defaults for the family:
 - `stepwise-testing` instrumentation is removed before the commit, to keep one clean commit per verified item.
 - Severity uses the blocker, major, minor, nit scale, with no maturity scores or findings counts as targets.
 
+### Remaining skill decisions
+
+Every skill in this group has a fictional `npm run <skill>:*` block, a fabricated sample report (scores, dates, dollars, week schedules), human-process padding and `compatibility: opencode`. Each `references/README.md` was a longer restatement of its SKILL.md and is dropped. The final set below supersedes the earlier per-skill names where they differ.
+
+| Final skill (`is-` prefixed in the repo) | Absorbs | Target size | Notes |
+|---|---|---|---|
+| `adversarial-review` | `devils-advocate`, `assumption-buster`, `assumption-testing`; `adversarial-thinking` dropped | ~4 KB, Pogo autoload | Neutral reviewer voice. Claim and assumption extraction, ranking by likelihood wrong x impact x cost to test, per-item record (location, claim, counterexample, evidence, verdict holds/broken/untested, severity). No quota, clean is valid, no business or market lenses, no active testing. |
+| `verify-claims` | `trust-but-verify`, `completeness-validator` (Tiers 1-2), a short domain-sanity section from `reality-validation` | ~6 KB, Inspector autoload | Per-claim-type re-verification, "tests pass for the wrong reason", stale evidence, five-level completion hierarchy, "completion is binary". Open questions go to the orchestrator. `anti-patterns.md` and `detection-guide.md` are on-demand references, trimmed. |
+| `spec-gap-analysis` | `gap-analysis`, `spec-gap-analysis` | ~4 KB, Inspector on demand | Six-type gap table, handler location, breaking-change checklist, architecture check reduced to boundaries and dependency directions. Counts like "8 of 12 operations found", no compliance score. Writes `evidence/gaps.md`. |
+| `security-review` | `redteam`, `white-hat`, `security-scan`, static items of `testing-security` | ~4 KB, Kessler autoload | Static only: code, config, dependency manifests and lockfiles, CI workflows, Dockerfiles, IaC. Finding record: title, CWE, severity, evidence (file:line), impact, recommendation. |
+| `threat-modeling` | STRIDE shape and actor profiles from `white-hat` and `redteam` | ~2 KB, Kessler on demand | Component, STRIDE category, existing control (file:line), gap, recommendation. |
+| `sherlock-debugging` | `sherlock-debugging`, a post-mortem section replacing `incident-response` | ~5.5 KB, Tiger Team autoload | 7-step evidence-first loop without asking the user; reproduce first with a failing test, `git bisect`, regression test before the fix, remove diagnostics before the commit; stuck rule aligned to 3 failures; case file in `evidence/`. |
+| `migration` | `code-migration`, `dependency-upgrade` | ~5-6 KB, Perseverance autoload, **core** | Baseline tests first, one verified step per commit, lockfile discipline, codemods first, migration ledger in `evidence/`, old-code removal as the last commit, escalate to Flight after 3 failures. OS-package and infrastructure upgrades dropped. Package installs are gate D. |
+| `git-release` | `git-release`, a Vercel readiness appendix from `vercel-deploy` | ~2.2 KB, Booster autoload | Uses the `<TODO-ID>:` commit convention, computes the range, handles no prior tag, prints `gh release create` and deploy commands only (gate F), notes in a separate file under `.interstage/`, credentials only from the user's environment. |
+| `api-documentation` | `api-documentation` | ~2.5 KB, Golden Record | Derives docs from existing specs and annotations, cites file:line, marks unknowns, reports spec-vs-implementation drift. |
+| `index` | `index` | ~2 KB, Golden Record on demand | Propose-only under `evidence/index-proposals/`. No `_prompt.md`. Never overwrites a human-authored file. Writes into the repo only at paths a TODO item names, as one commit. |
+| `structured-logging` (observability) | `logging-fundamentals`, `logging-performance-optimization`, a stdout/rotation note from `log-management-system` | ~3.5-4 KB | Level table, field schema and redaction rule, hot-path and sampling rules, language decision table. |
+| `tracing-correlation` (observability) | `distributed-tracing-logs`, log-to-trace parts of `observability-logging` | ~2.5-3 KB | W3C `traceparent`, propagation table, OTel manual and auto instrumentation by language, `trace_id`/`span_id` injection. SLO and burn-rate thresholds are verified against a primary source before they ship, or dropped. |
+| `log-analysis` (observability) | `log-analysis-parsing` | ~3 KB | Format table, multiline and timezone rules, jq/awk/grep recipes, evidence-based report. Tiger Team and Hubble read it on demand. |
+| `web-review` (web) | `react-review`, `accessibility-audit`, `testing-accessibility` | ~3-4 KB | Static a11y checklist (alt, labels, headings, ARIA, keyboard, focus, token contrast, `lang`), runs axe or pa11y only if the project already has them, cites the WCAG SC number, no memoization advice without a measured reason, no VPAT, legal or user-testing material. |
+| `database-optimization`, `data-validation` (data) | the same names | ~2 KB each | Static review of SQL, ORM and migrations. `EXPLAIN` only against a project-provided local or test database. Migration index creation uses `CONCURRENTLY` where applicable. Reuse the project's own validator. No PII in reports. |
+| `performance-profiling` (ops) | `performance-profiling`, `testing-performance`; chaos stays opt-in | ~3-4 KB | Local method: benchmark baseline with N runs, language-native sampler, hypothesis, one change, re-measure, report the delta as evidence. A table maps Linux-only tools (`perf`, eBPF, ftrace, SystemTap) to macOS equivalents; Linux-only tools run only when `uname` is Linux, the tool is on PATH and root is available. |
+| `forge` (forge) | Interstage-authored; nothing vendored except the name regex and length limits | ~6 KB + validator script | Skill and agent authoring: OMP frontmatter reference for skills and agents, rules (never invent tools, `autoload-skills` 1-3, subagents never `ask`, `lsp` needs `tools: lsp` plus the `task.enableLsp` override), BUILD, BREAK, REPAIR with BREAK done by Pogo. A validator script checks frontmatter, names, `skill://` links, named scripts exist, and no schedules, scores, timestamps, `compatibility:` or `.opencode`. The same script runs in CI. No roster agent. |
+
+Dropped from v1: `adversarial-thinking`, `incident-response` (folded into `sherlock-debugging`), `reality-validation` and `completeness-validator` (folded into `verify-claims`), `log-management-system`, `observability-logging` (mostly), `cloud-cost-optimization`, `vercel-deploy` (folded into `git-release`), `skill-builder`, `hypercognitive-skill-compiler` and `dogfooding` (replaced by `forge`), `context-pack`, `workflow-orchestrator`, `redteam`, `white-hat`, `security-scan` (replaced by `security-review`), `testing-security` (absorbed into `security-review`).
+
+Core ships about 20 skills: `baby-steps`, `exhaustive-specification`, `best-practice-guide`, `migration`, `verify-claims`, `spec-gap-analysis`, `adversarial-review`, `security-review`, `threat-modeling`, `sherlock-debugging`, `stepwise-testing`, `git-release`, `api-documentation`, `index`, `testing-expected-results`, `test-strategy`, `test-pipeline`, `testing-integration`, `testing-e2e`, `test-gap-analysis`.
+
+Per-skill trimming notes for the two methodology skills:
+
+- `baby-steps` (18 KB to about 5-6 KB, autoloaded by Flight, Perseverance and Curiosity): keep the "when NOT to use" list, the context modes (Legacy: characterization tests first), the six rules condensed, the recovery protocol with the stuck rule added, step-size examples, anti-patterns, a one-block step report (TODO-ID, goal, files, validation, next, blockers). Drop human-time durations, the time table, team coordination, PR cadence, `Step N:` and `WIP:` commits, `feature/...` branches, the four worked examples, cost-benefit. Reverts happen inside the isolated worktree and never reset the mission branch. Crisis mode points at Tiger Team and the fast lane.
+- `exhaustive-specification` (20 KB to about 5.5-6 KB, plus `references/catalog.md` of about 3 KB): keep writing standards per spec kind, the structure template and the quality gates, with the blind-person gate for UI specs only. Always-on tiers: Tier 1 Foundation (S01 System Overview, S02 Domain Model, S03 Glossary) and Tier 8 Quality (Q01 Test Strategy, Q02 Test Cases, Q03 Acceptance Criteria, Q04 Quality Gates), where Q01 holds the project stage and threshold overrides, Q03 becomes each TODO item's "done when" and Q04 holds the gate definitions. Small jobs may use a short section with "N/A, reason". The other 15 tiers move to the catalog. The upstream ID collision (sequential S01-S12 index vs tier-prefixed IDs) is resolved in favor of tier-prefixed IDs. The index file is `INDEX.md` (columns: ID, file, tier, status, depends, N/A reason), no dates or counts. `references/README.md` is deleted, with about 1.2 KB folded in (pitfall remedies, no mocks, requirement-to-test cross-references).
+
+FIDO selection rule (the plan gate approves the set; excluded tiers are listed with a one-line reason, never dropped silently):
+
+| Project signal | Add |
+|---|---|
+| User-facing UI | Tier 2 U01-U06 (U05 accessibility if a WCAG target is stated) |
+| HTTP/RPC service or library API | A01, A02 (if auth), A03, A04; A05 if public or rate-limited; A06 if webhooks |
+| Persistent data | D01, D03, D04; D02 if performance-sensitive; D05 if PII or retention rules |
+| Rules, lifecycles, money, calculations | B01-B04 as applicable; B05 if it notifies users |
+| Any service with users or secrets | X01, X04, X05 (X02, X03 point at the observability pack) |
+| Deploy in scope | O01; O02 if IaC; O03 if latency or throughput targets; O04, O05 only at production stage |
+| External services or events | I01; I02 public API; I03 flags; I04 inbound webhooks; I05 event-driven |
+| Mobile app | Tier 10 M01-M05 (M04 only if offline, M05 only if push) |
+| Trains or serves models | Tier 11 AI01-AI05 (AI02, AI04 only if training is in scope) |
+| Production, operated service | SRE01, SRE02; SRE04 only with the chaos opt-in. SRE03 and SRE05 are dropped (human process) |
+| Multi-locale requirement | Tier 13 L01-L04 |
+| ETL or pipeline | Tier 14 DE01-DE04; DE05 if there is a cache |
+| Realtime or collaborative | Tier 15 RT01-RT04 |
+| Product-analytics requirement | AN01 only (AN02, AN03 dropped) |
+| Auth, PII, money or exposed attack surface | SEC01, SEC02; SEC03 only if a compliance regime is named; SEC04 if an audit requirement is stated |
+
 ### Vendoring bookkeeping
 
 - `THIRD_PARTY_NOTICES.md` carries the upstream LICENSE verbatim and the source commit.
@@ -327,6 +439,8 @@ No hardware-specific design in v1. Build, test and verify commands are configura
 
 ## Open questions
 
-1. Skills not yet read in depth, to be reviewed before trimming: `trust-but-verify`, `reality-validation`, `gap-analysis`, `spec-gap-analysis`, `devils-advocate`, `assumption-buster`, `assumption-testing`, `adversarial-thinking`, `sherlock-debugging`, `incident-response`, the logging and observability family, `api-documentation`, `index`, `code-migration`, `dependency-upgrade`, `git-release`, the web, data and ops pack skills, and the forge skills. `redteam`, `white-hat` and `security-scan` are reviewed at the SKILL.md level only.
-2. Docker MCP (the Docker MCP Gateway) is deferred. Booster uses `bash docker ...`. Revisit if a container-management tool is wanted. Docker Desktop was not running on the dev machine when checked.
-3. Everything under "Not verified" in the spike results.
+1. Docker MCP (the Docker MCP Gateway) is deferred. Booster uses `bash docker ...`. Revisit if a container-management tool is wanted. Docker Desktop was not running on the dev machine when checked.
+2. Everything under "Not verified" in the spike results.
+3. Killing a running subagent through its job (`write proc://<id>/kill`) is unverified. v1 applies steering at item boundaries only.
+4. Skills are reviewed at SKILL.md level in full except `redteam`, `white-hat` and `security-scan`, which were reviewed for structure and guardrails only, and `notebooklm-federated-specs` and `opencode-config`, which are out of v1. The OWASP/CWE static checklist for Kessler has no upstream source and is authored fresh (pin the OWASP year).
+5. The upstream scripts are not vendored by default. The only candidates are `chunk-conversation.sh`, `validate-todo.sh` and `testing-expected-results/scripts/verify.sh`, each subject to the shellcheck and macOS/Linux portability pass. Their contents have not been read.
