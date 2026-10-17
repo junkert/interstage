@@ -29,7 +29,7 @@ Interstage is named after the rocket section that hands off cleanly between stag
 user <-> CAPCOM (main session) -> Houston (project) -> Flight (mission) -> specialists
 ```
 
-- CAPCOM is the only agent that talks to the user. The extension strips `ask` from every subagent.
+- CAPCOM is the only agent that talks to the user. OMP already withholds `ask` from subagent sessions, so specialists cannot ask the user.
 - OMP's default `task.maxRecursionDepth` is 2. Interstage needs at least 3. The extension raises it with a runtime override.
 
 ### Activation (opt-in per session)
@@ -38,9 +38,9 @@ user <-> CAPCOM (main session) -> Houston (project) -> Flight (mission) -> speci
 - The extension sets runtime overrides: depth of at least 3, `task.isolation.enabled`, and branch merge mode.
 - The extension swaps in the CAPCOM persona for the main session only, via `before_agent_start`.
 - A shell alias or function is documented as optional. There is no wrapper binary and no PATH install.
-- Plain `omp` keeps its behavior apart from the core plugin's visible skills. Agents, commands and persona only appear with `--interstage`.
+- Plain `omp` keeps its behavior apart from what the core plugin adds globally: its skills in the skill list and the Context7 MCP server. Agents, commands and persona only appear with `--interstage`.
 
-### Extension duties (assumed; the answer was left blank)
+### Extension duties (confirmed)
 
 1. Inject the CAPCOM persona into the main session only.
 2. Enforce autonomy-level gates (`before_subagent_spawn`, `tool_call` hooks).
@@ -81,17 +81,17 @@ Extension-registered: `/interstage:init`, `:launch`, `:status`, `:abort`, `:doct
 | CAPCOM | User-facing project manager (main session) | |
 | Houston | Project orchestrator | |
 | Flight | Mission sub-orchestrator running the Ralph-style loop | Interstage-native loop prompt (derived from `ralph-wiggum-loop` and `ai-collab-dev`), `baby-steps` |
-| FIDO | Planner and architect | `exhaustive-specification`, `data-flow-architect`, `best-practice-guide` |
-| Sojourner, Ingenuity | Read-only scouts (cheap and broad) | `context-pack` |
-| Hubble | Research: libraries, docs, prior art | |
+| FIDO | Planner and architect | `exhaustive-specification`; on demand: `data-flow-architect` |
+| Sojourner, Ingenuity | Read-only scouts (cheap and broad) | none; a scout handoff report format is part of the prompt |
+| Hubble | Research: libraries, docs, prior art (Context7) | `best-practice-guide` (trimmed, on demand) |
 | Perseverance | Long-running implementer (migrations, refactors) | `code-migration`, `dependency-upgrade`, `baby-steps` |
 | Curiosity | General implementer | `baby-steps` |
-| Go/No-Go | QA | `testing-*`, `test-*` |
-| Orbiter | Integration, e2e and contract tests | `testing-integration`, `testing-e2e`, `testing-api` |
-| Inspector | Independent verifier and gap analyst | `trust-but-verify`, `completeness-validator`, `reality-validation`, `testing-expected-results`, `gap-analysis`, `spec-gap-analysis`, `test-gap-analysis` |
+| Go/No-Go | QA runner and gate | autoload: `test-pipeline`, `testing-expected-results`; on demand: `test-strategy`, `testing-integration`, `testing-e2e`, pack testing skills |
+| Orbiter | Integration, e2e and contract tests | autoload: `testing-integration`, `testing-e2e`; on demand: `testing-expected-results`, `test-pipeline` |
+| Inspector | Independent verifier and gap analyst | autoload: `completeness-validator`, `test-gap-analysis`, `testing-expected-results`; on demand: `trust-but-verify`, `reality-validation`, `gap-analysis`, `spec-gap-analysis` |
 | Kessler | Security review (static only: code, config, dependencies, threat models) | `redteam`, `white-hat`, `security-scan`, `testing-security`, without the upstream scripts |
 | Pogo | Devil's advocate on plans, specs and assumptions | `devils-advocate`, `assumption-buster`, `assumption-testing`, `adversarial-thinking` |
-| Tiger Team | Debugging and incident response | `sherlock-debugging`, `stepwise-testing`, `incident-response`, `log-analysis-parsing` |
+| Tiger Team | Debugging and incident response | `sherlock-debugging`, `stepwise-testing`; on demand: `incident-response`, `log-analysis-parsing` |
 | Booster | DevOps and CI | `git-release` |
 | Golden Record | Documentation | `api-documentation`, `index` (writes `_index.md` files into the repo only on explicit request) |
 
@@ -102,9 +102,9 @@ Skill names in the table are upstream names. In the repo each carries an `is-` p
 | Pack | Skills |
 |---|---|
 | observability | `logging-fundamentals`, `logging-performance-optimization`, `log-management-system`, `log-analysis-parsing`, `distributed-tracing-logs`, `observability-logging` |
-| web | `react-review`, `accessibility-audit`, `testing-accessibility`, `vercel-deploy`, `testing-usability` |
+| web | `react-review`, `accessibility-audit`, `testing-accessibility`, `vercel-deploy` |
 | data | `database-optimization`, `data-validation`, `data-flow-architect`, `testing-database` |
-| ops | `cloud-cost-optimization`, `performance-profiling`, `dependency-upgrade`, `code-migration`, `incident-response` |
+| ops | `cloud-cost-optimization`, `performance-profiling`, `testing-performance` (with opt-in chaos), `dependency-upgrade`, `code-migration`, `incident-response` |
 | forge | `skill-builder`, `hypercognitive-skill-compiler`, `dogfooding` |
 
 Out of v1: `opencode-config`, `notebooklm-federated-specs`.
@@ -165,15 +165,16 @@ Dropped from Ralph: Python runner, plugin system, DAG and saga engine, OTel, das
 
 OMP ships about 40 language servers in `defaults.json`, auto-detected per project by root markers and binary on PATH. Interstage ships no per-language LSP configs.
 
-- Policy (assumed): implementers and verifiers run `lsp` diagnostics on changed files before reporting done. Inspector rejects "done" without clean diagnostics. This requires the extension to override `task.enableLsp` to true, and each such agent to declare `lsp` in `tools:`.
-- `/interstage:doctor` (assumed): detects project languages and reports missing language servers, test runners and linters, with install commands. It never installs anything. Without a server the `lsp` tool answers `No language server found`.
+- Policy: implementers and verifiers run `lsp` diagnostics on changed files before reporting done. Inspector rejects "done" without clean diagnostics. This requires the extension to override `task.enableLsp` to true, and each such agent to declare `lsp` in `tools:`.
+- `/interstage:doctor`: detects project languages and reports missing language servers, test runners, linters, `gh` and its auth, with install commands. It never installs anything. Without a server the `lsp` tool answers `No language server found`.
 - Overrides are shipped only where a default is wrong for agent work. None are planned.
 
 ### MCP
 
-- OMP's built-in `lsp`, `browser`, `github`, `web_search` and AST tools are used first.
-- Candidate servers: Context7, GitHub, Playwright (only if the built-in browser tool falls short), sequential-thinking and memory.
-- MCP servers ship disabled. `/interstage:init` asks which to enable for the project and what auth each needs.
+- OMP's built-in `lsp`, `browser`, `github`, `web_search`, `think`, memory (`retain`/`recall`) and AST tools are used first.
+- v1 ships one MCP server: **Context7** (hosted at `https://mcp.context7.com/mcp`, no API key needed at lower rate limits). It is shipped enabled as `.mcp.json` at the root of the core plugin (verified). Consequence: Context7 is available in every omp session once the plugin is installed, like the core skills.
+- Dropped, because OMP already provides them: GitHub MCP (the built-in `github` tool covers repo reads, search, PR create/checkout/push and Actions watching; it needs `gh` on PATH, `gh auth login` and `github.enabled`, which the extension turns on under `--interstage` and `/interstage:doctor` checks), memory MCP (OMP `retain`/`recall`), sequential-thinking MCP (built-in `think` and model thinking), and Playwright MCP (OMP silently drops standalone browser MCP servers while the built-in browser tool is on, so the built-in browser is used for e2e).
+- Deferred: Docker MCP Gateway. Booster uses `bash docker ...`.
 - Constraint: a task agent's `tools:` list does not remove MCP tools. Subagents inherit all session MCP tools. Per-agent MCP assignment is therefore guidance in agent prompts, not enforcement.
 
 ## Skills and licensing
@@ -220,6 +221,48 @@ Audit of `/Users/levi/projects/skills/skills` (72 skills). Every skill has `comp
 
 Content derived from rewritten skills is still credited in `THIRD_PARTY_NOTICES.md`.
 
+### Core skill decisions
+
+Findings from reading `data-flow-architect`, `best-practice-guide`, `context-pack`, `completeness-validator` and the whole testing family. About 150 `npm run test:*` commands, plus an `npm run best-practice:*` block, refer to scripts that do not exist. Every adapted skill gets a pass that removes fictional commands, fabricated timestamps and sample scores, and human schedules.
+
+| Skill | Decision |
+|---|---|
+| `context-pack` | Dropped. OMP's `read` (directories), `glob` and `grep` cover it, and subagents cannot use its TUI. A short "scout handoff report" format goes into the Sojourner and Ingenuity prompts. |
+| `best-practice-guide` | Vendored and trimmed to about 2-3 KB. Gap detection and research-with-sources only. Hubble owns it, read on demand. Output goes to `.interstage/missions/<id>/research/`. Promotion into `AGENTS.md` or `docs/` only through `/interstage:promote`. The "create new skills" and fictional npm parts are removed. |
+| `completeness-validator` | Vendored and trimmed to about 4-5 KB. Tiers 1-2 only (static, runtime). Tier 3 (production readiness), the multilingual-prompting trick and the `@completeness-validator` command are dropped. Fabricated timestamps and score examples are reworded as evidence-based findings. Inspector autoloads it. `anti-patterns.md` and `detection-guide.md` are read on demand. |
+| `data-flow-architect` | Vendored and trimmed to about 6-7 KB (generic pattern catalogs and duplicated sections removed). Output goes to `.interstage/missions/<id>/specs/`. Human interview steps become "report open questions to Flight". FIDO reads it on demand. |
+| `references/README.md` files | Dropped everywhere (placeholders or duplicates of SKILL.md), except `test-gap-analysis`'s real reference, which is folded into the consolidated skill. |
+
+### Testing family
+
+The 27 upstream testing skills (143 KB) consolidate into 11 (about 37 KB). Names carry the `is-` prefix.
+
+| Interstage skill | Absorbs |
+|---|---|
+| `testing-expected-results` | `testing-expected-results` (verify.sh kept only if it passes the portability pass, otherwise methodology only) |
+| `test-strategy` | `testing-level-selector`, `testing-level-poc`, `testing-level-mvp`, `testing-level-production`, `testing-ecosystem`, `test-planning`, `testing-functional-suite`, `testing-nonfunctional-suite` |
+| `test-pipeline` | `test-orchestrator`, `test-dependency-mapper`, `testing-smoke`, `testing-regression` |
+| `testing-integration` | `testing-integration`, `testing-api` |
+| `testing-e2e` | `testing-e2e`, `testing-compatibility` |
+| `test-gap-analysis` | `test-gap-analysis` (with its reference), `test-coverage` |
+| `stepwise-testing` | `stepwise-testing` |
+| `testing-database` (data pack) | `testing-database` |
+| `testing-accessibility` (web pack) | `testing-accessibility` |
+| `testing-performance` (ops pack) | `testing-performance`, `testing-chaos` (chaos is opt-in) |
+| `testing-security` (Kessler) | `testing-security`, static items only; DAST and pentest dropped |
+
+Dropped outright: `testing-unit` (no unique content), `testing-usability` (needs human participants), `testing-functional-suite` and `testing-nonfunctional-suite` (pure aggregators).
+
+Policy defaults for the family:
+
+- Go/No-Go reports pass/fail only. It never says "safe to deploy"; shipping is gate F.
+- Flaky tests are recorded as findings. They are never auto-retried or quarantined to get green.
+- Commands come from the project's own test command (`package.json` scripts, `Makefile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, CI config or `interstage.yml`). Numeric thresholds are defaults the SPEC Quality spec can override.
+- The project stage (POC, MVP, production) is chosen in the discovery interview and stored in the SPEC Quality spec.
+- Gap reports go to one file, `.interstage/missions/<id>/evidence/gaps.md`.
+- `stepwise-testing` instrumentation is removed before the commit, to keep one clean commit per verified item.
+- Severity uses the blocker, major, minor, nit scale, with no maturity scores or findings counts as targets.
+
 ### Vendoring bookkeeping
 
 - `THIRD_PARTY_NOTICES.md` carries the upstream LICENSE verbatim and the source commit.
@@ -256,23 +299,24 @@ Run with `omp` 18.11.3, headless (`-p`), `claude-haiku-4-5`, a throwaway extensi
 - Skill visibility: `disable-model-invocation: true` (and `hide: true`) remove a skill from the model-visible listing in plain `omp`, while `autoload-skills` still injects it into an agent. Not adopted for Interstage (see "Skill adaptation").
 - Agent visibility: overriding `task.disabledAgents` to `["spikeagent"]` in a main session started without `--interstage` hid the plugin agent (the model saw no agents). With `--interstage` the agent spawned and ran.
 - Skill and agent discovery is global once a plugin is installed. Without the override, skills and agents of an installed plugin appear in every `omp` session.
+- Interactive TUI (real pty session): `/interstage:launch` typed mid-session applied the overrides and the persona (`[CAPCOM]` on the next prompt). The main session had the `ask` tool and rendered its dialog. A subagent spawned afterwards inherited depth 4, had no `ask`, and had `lsp` (because of the `task.enableLsp` override). Module state set in the main session is not visible in subagent extension instances (`launched` was false in the child).
+- Plugin-shipped MCP: a marketplace plugin with `.mcp.json` at the plugin root loaded Context7 (`{"mcpServers":{"context7":{"type":"http","url":"https://mcp.context7.com/mcp"}}}`). The model resolved `react` to `/reactjs/react.dev`. A root `mcp.json` was ignored; the file must be named `.mcp.json`. The server loaded without `--interstage`, so it is global once the plugin is installed.
 
 ### Not verified
 
-- Interactive TUI behavior: `ask` in the main session, and `/interstage:launch` mid-session.
 - Many-item parallel merges and larger conflict cases. Flight must read each task result and handle leftover `omp/task/*` branches.
 - `tool_call` hooks for gates D and E (dependency installs, merges). Only `before_subagent_spawn` was exercised.
 - LSP diagnostics against a real server. None was installed for the test language, so the tool answered `No language server found`, which also shows `/interstage:doctor` is needed.
 - Behavior on other `omp` versions, and when the user already has `modelRoles` or `task.*` settings configured.
 
-## Framework testing (assumed; the answer was left blank)
+## Framework testing (confirmed)
 
 - Static validation (script and CI): every agent frontmatter parses under OMP's rules, names are unique, every `autoloadSkills` entry exists, and vendored skills carry the MIT license and appear in `THIRD_PARTY_NOTICES.md`.
 - Unit tests (`bun test`) for extension logic that prompts cannot enforce: autonomy gate decisions, budget and circuit-breaker accounting, severity "clean" evaluation, lane routing, `init` idempotency.
 - Headless smoke test: run `omp` with the plugin against a small fixture repo in the fast lane. Assert the artifacts, mission branch and commit.
 - Manual dogfood checklist per release.
 
-## Hardware seams (assumed; the answer was left blank)
+## Hardware seams (confirmed)
 
 No hardware-specific design in v1. Build, test and verify commands are configurable per project so firmware, PCB, CAD or HDL packs can be added later without changing the core.
 
@@ -283,8 +327,6 @@ No hardware-specific design in v1. Build, test and verify commands are configura
 
 ## Open questions
 
-1. Skill adaptation: execute the dispositions above, and read `data-flow-architect`, `best-practice-guide`, `context-pack`, `completeness-validator` and the 25 or so thin `testing-*` skills before trimming them. Verify script portability on macOS and Linux.
-2. Agents are hidden outside Interstage sessions through a `task.disabledAgents` override (verified). Confirm this still applies now that skills stay visible.
-3. Confirm the assumptions marked "assumed" (extension duties, LSP policy and doctor, framework tests, hardware seams).
-4. MCP: which servers `/interstage:init` offers, and how it handles credentials (for example the GitHub token).
-5. Interactive-mode behavior was not spiked (see "Not verified" above).
+1. Skills not yet read in depth, to be reviewed before trimming: `trust-but-verify`, `reality-validation`, `gap-analysis`, `spec-gap-analysis`, `devils-advocate`, `assumption-buster`, `assumption-testing`, `adversarial-thinking`, `sherlock-debugging`, `incident-response`, the logging and observability family, `api-documentation`, `index`, `code-migration`, `dependency-upgrade`, `git-release`, the web, data and ops pack skills, and the forge skills. `redteam`, `white-hat` and `security-scan` are reviewed at the SKILL.md level only.
+2. Docker MCP (the Docker MCP Gateway) is deferred. Booster uses `bash docker ...`. Revisit if a container-management tool is wanted. Docker Desktop was not running on the dev machine when checked.
+3. Everything under "Not verified" in the spike results.
