@@ -41,6 +41,7 @@ export type ItemEvent =
   | "retry"
   | "planner_revised"
   | "planner_blocked"
+  | "unblock"
   | "integrate_ok"
   | "integrate_conflict";
 

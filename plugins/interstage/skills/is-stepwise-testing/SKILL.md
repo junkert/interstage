@@ -26,10 +26,12 @@ When a call across a network fails, test from the bottom layer up and stop at th
 |---|---|---|
 | Name resolution | does the host resolve? | `dig`, `nslookup`, a resolver call in the language |
 | Transport | can a connection open? | `nc -z host port`, a socket connect |
-| Protocol | does a request get a response? | `curl -v` and its status and headers |
+| Protocol | does a request get a response? | the language's HTTP client, or the project's own CLI; print the status and headers |
 | Application | is the body correct? | parse and assert on the response |
 
 The same shape applies elsewhere: file exists, readable, parses, has the expected content.
+
+Do not shell out to `curl` or `wget` in a subagent: the extension blocks them (gate D). Use the language's HTTP client or the project's CLI, or report the need to your orchestrator as an open question.
 
 ## Instrumentation
 

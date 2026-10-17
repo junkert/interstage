@@ -16,9 +16,9 @@ Emit one JSON object per line to stdout. Context matters more than message conte
 | `level` | one of the levels below |
 | `service`, `environment`, `version` | set once at logger construction |
 | `message` | constant text; variable data goes in fields |
-| `trace_id`, `span_id` | injected by the tracing bridge, never hand-built (see `skill://is-tracing-correlation`) |
+| `trace_id`, `span_id` | injected by the tracing bridge, never hand-built; the source field name differs by library, so map it (see `skill://is-tracing-correlation`) |
 | `request_id` | from the inbound request or generated at the edge |
-| `error_code`, `error_details`, `stack_trace` | on ERROR only; stack trace as one string field |
+| `error_code`, `error_details`, `stack_trace` | on ERROR and FATAL; stack trace as one string field |
 | `duration_ms` | for timed operations |
 | `context` | object of domain identifiers (for example order id), not whole payloads |
 
@@ -31,6 +31,8 @@ Emit one JSON object per line to stdout. Context matters more than message conte
 | WARN | unexpected but handled, may need attention |
 | ERROR | a specific operation failed |
 | FATAL | the process is terminating |
+
+Level names differ: Python calls FATAL `CRITICAL`, and Go `log/slog` has no FATAL level (log at ERROR, then exit).
 
 ## Redaction rule
 
@@ -55,7 +57,7 @@ Write to stdout and let the platform rotate. Where the process must write files,
 
 | Language | Library | Config | Correlation hook |
 |---|---|---|---|
-| Python | stdlib `logging` with a JSON formatter, or `structlog` | level, handlers, formatter | `opentelemetry-instrumentation-logging` adds trace and span ids to records |
+| Python | stdlib `logging` with a JSON formatter, or `structlog` | level, handlers, formatter | `opentelemetry-instrumentation-logging` sets `otelTraceID`, `otelSpanID` on records; map them to `trace_id`, `span_id` in the formatter |
 | Java | Logback or Log4j2 with a JSON encoder | root level, appender, MDC keys | OpenTelemetry Java agent puts `trace_id`, `span_id` in MDC |
 | Node.js | `pino` | `level`, `redact` paths | OpenTelemetry pino instrumentation adds `trace_id`, `span_id` |
 | Go | stdlib `log/slog` with `NewJSONHandler` | `HandlerOptions.Level`, `ReplaceAttr` for redaction | read the span context from `ctx` and add attributes; use `InfoContext` |
@@ -65,7 +67,7 @@ Use the project's existing logger; do not introduce a second one.
 ## Review checklist
 
 - Fields are keys, not interpolated text; message is constant.
-- Level fits the table; failures are ERROR with `error_code` and cause.
+- Level fits the table; failures are ERROR (or FATAL) with `error_code` and cause.
 - No secrets or raw bodies; redaction is configured centrally.
 - No expensive argument built on a disabled level.
 - Severity of findings: leaked secret is `blocker`; ERROR without context `major`; style `minor`.

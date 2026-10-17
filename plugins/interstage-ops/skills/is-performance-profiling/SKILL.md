@@ -32,8 +32,10 @@ Report measured deltas, never estimates. Every number in a report comes from a c
 | CPU sampling | `perf` | `sample <pid>`, `xctrace` (Instruments) | Node `--cpu-prof`; Python `cProfile`, `py-spy`; Go `pprof`; Rust `cargo flamegraph`; JVM JFR |
 | Kernel tracing | eBPF/BCC, ftrace, SystemTap | dtrace-based tools | n/a |
 | Syscalls | `strace` | `dtruss` (dtrace) | n/a |
-| Wall time and memory of a command | `/usr/bin/time -v` | `time -l` | Rust `criterion` for microbenchmarks |
-| Before/after command benchmark | `hyperfine` | `hyperfine` | n/a |
+| Wall time and memory of a command | GNU `/usr/bin/time -v` (may be absent on minimal images) | `/usr/bin/time -l` (the shell builtin `time` has no `-l`) | n/a |
+| Microbenchmarks | n/a | n/a | Rust `criterion` |
+
+Neutral: `hyperfine` benchmarks a command before and after a change on either OS. It is third-party; if absent, report "not run" with the reason.
 
 Linux-only tools run only when `uname` reports Linux, the tool is on PATH and the needed privileges exist. Otherwise record "not run" with the reason. Tracing tools may need root; never escalate privileges on your own, report it as an open question.
 

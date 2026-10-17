@@ -9,7 +9,7 @@ import { activate, createSettingsPort, projectRoot, type Runtime } from "./activ
 import { checkBudgets } from "./budget";
 import { DEFAULT_CONFIG } from "./config";
 import { ENV_MISSION_ID, ENV_STATE_DIR, type ItemState } from "./contracts";
-import { loadApprovals, loadEffectiveConfig, loadItems, loadMission, loadUsage, missionDirOf, saveMission, userConfigPath, withMissionLock } from "./state";
+import { listMissionIds, loadApprovals, loadEffectiveConfig, loadItems, loadMission, loadUsage, missionDirOf, saveMission, userConfigPath, withMissionLock } from "./state";
 import type { GitExec } from "./tools";
 
 type Notify = (message: string, type?: "info" | "warning" | "error") => void;
@@ -366,6 +366,22 @@ export async function doctorReport(c: DoctorEnv): Promise<string> {
   const { errors, unknownKeys } = await loadEffectiveConfig(join(root, ".interstage"), c.env);
   lines.push(errors.length === 0 ? "Config: no errors" : `Config errors:\n${errors.map(e => `- ${e}`).join("\n")}`);
   if (unknownKeys.length > 0) lines.push(`Unknown config keys (ignored): ${unknownKeys.join(", ")}`);
+
+  const stateDir = c.env[ENV_STATE_DIR] ?? join(root, ".interstage");
+  const activeId = c.env[ENV_MISSION_ID];
+  if (activeId === undefined || activeId === "") {
+    lines.push("Active mission: none (INTERSTAGE_MISSION_ID is not set)");
+  } else {
+    const found = await loadMission(missionDirOf(stateDir, activeId)).catch(() => undefined);
+    lines.push(found === undefined ? `Active mission: ${activeId} does NOT resolve to a readable mission under ${stateDir}` : `Active mission: ${activeId} (${found.status}, branch ${found.branch})`);
+  }
+  const unfinished: string[] = [];
+  for (const id of await listMissionIds(stateDir)) {
+    const record = await loadMission(missionDirOf(stateDir, id)).catch(() => undefined);
+    if (record === undefined) unfinished.push(`${id} (unreadable mission.json)`);
+    else if (record.status !== "complete" && record.status !== "aborted") unfinished.push(`${id} (${record.status}): ${record.title}`);
+  }
+  lines.push(unfinished.length === 0 ? "Unfinished missions: none" : `Unfinished missions:\n${unfinished.map(entry => `- ${entry}`).join("\n")}`);
   return lines.join("\n");
 }
 

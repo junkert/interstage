@@ -29,7 +29,14 @@ const INSTALL: RegExp[] = [
   /\bbrew\s+install\b/,
   /\bapt(-get)?\s+install\b/,
 ];
-const NETWORK: RegExp[] = [/\b(curl|wget)\b/, /\bgit\s+(clone|fetch|pull)\b/, /\bgh\s+api\b/];
+const NETWORK: RegExp[] = [
+  /\b(curl|wget)\b/,
+  /\bgit\s+(clone|fetch|pull)\b/,
+  /\bgh\s+api\b/,
+  /\b(npm|yarn|pnpm|bun|cargo)\s+audit\b/,
+  /\bpip-audit\b/,
+  /\bdocker\s+(pull|build)\b/,
+];
 const MERGE: RegExp[] = [/\bgit\s+merge\b.*\bomp\/task\//];
 const SHIP: RegExp[] = [
   /\bgit\s+push\b/,

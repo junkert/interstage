@@ -80,6 +80,7 @@ const EVENT_FROM: Record<ItemEvent, ItemState> = {
   planner_blocked: "planning",
   integrate_ok: "integrating",
   integrate_conflict: "integrating",
+  unblock: "blocked",
 };
 
 function fail(ctx: ApplyContext, text: string, next?: string): ApplyResult {
@@ -229,6 +230,17 @@ export function applyEvent(ctx: ApplyContext, input: ApplyInput): ApplyResult {
       text = `${item.id} is done at ${commit}.`;
       break;
     }
+    case "unblock": {
+      const decision = input.note?.trim();
+      if (decision === undefined || decision === "") return fail(ctx, `unblock needs a note with the user decision for ${item.id}.`);
+      item.failures = 0;
+      item.conflicts = 0;
+      item.plannerRounds = 0;
+      move("unblock", "pending", decision);
+      text = `${item.id} is unblocked and pending; its counters were reset.`;
+      next = `start ${item.id}`;
+      break;
+    }
     case "integrate_conflict": {
       item.conflicts += 1;
       if (item.conflicts >= MAX_CONFLICTS) {
@@ -238,7 +250,7 @@ export function applyEvent(ctx: ApplyContext, input: ApplyInput): ApplyResult {
       } else {
         move("integrate_conflict", "building");
         text = `${item.id} conflicted (${item.conflicts} of ${MAX_CONFLICTS - 1} rebuilds allowed) and is rebuilding on the updated mission branch.`;
-        next = `rebuild ${item.id} on the updated mission branch`;
+        next = `rebuild ${item.id} on the updated mission branch with the same task name ${item.id}; read the new branch name from the task result, because retries produce omp/task/${item.id}-2, -3`;
       }
       break;
     }
@@ -254,7 +266,7 @@ export function applyEvent(ctx: ApplyContext, input: ApplyInput): ApplyResult {
 
 function nextAfterFailure(item: ItemRecord, mission: MissionRecord): string {
   if (mission.status === "halted") return "stop spawning: ask CAPCOM to resume the halted mission";
-  if (item.state === "planning") return `spawn pogo to revise ${item.id}`;
+  if (item.state === "planning") return `spawn fido as the planner to revise ${item.id}`;
   if (item.state === "blocked") return `report ${item.id} as blocked to CAPCOM`;
   return `retry ${item.id}`;
 }

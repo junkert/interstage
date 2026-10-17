@@ -9,13 +9,17 @@
 # holds one human message and the replies that follow it. Text before the first
 # human line is dropped.
 #
-# Usage: chunk-conversation.sh [--out <dir>] <conversation-file>
+# Usage: chunk-conversation.sh [--out <dir>] [--force] <conversation-file>
 #
 # Output directory, in order of precedence:
 #   1. --out <dir>
 #   2. $INTERSTAGE_STATE_DIR/missions/$INTERSTAGE_MISSION_ID/import/chunks
 #      (when both variables are set)
 #   3. ./chunks
+#
+# The script refuses an output directory that already has files in it, so a shorter
+# conversation never leaves stale chunks behind. --force deletes the existing
+# chunk-*.txt files in that directory first and keeps everything else.
 #
 # Writes chunk-001.txt, chunk-002.txt, ... and prints one JSON line on stdout:
 #   {"chunks": <n>, "output_dir": "<dir>"}
@@ -24,7 +28,7 @@
 set -euo pipefail
 
 usage() {
-  printf '%s\n' "Usage: $0 [--out <dir>] <conversation-file>" >&2
+  printf '%s\n' "Usage: $0 [--out <dir>] [--force] <conversation-file>" >&2
 }
 
 json_escape() {
@@ -39,6 +43,7 @@ json_escape() {
 
 input=""
 out_dir=""
+force=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -50,6 +55,10 @@ while [ $# -gt 0 ]; do
       fi
       out_dir=$2
       shift 2
+      ;;
+    --force)
+      force=1
+      shift
       ;;
     -h | --help)
       usage
@@ -90,6 +99,19 @@ if [ -z "$out_dir" ]; then
   fi
 fi
 
+if ! grep -Eq '^(Human|User|Me):' "$input"; then
+  printf '%s\n' "Error: no line starting with Human:, User: or Me: in $input" >&2
+  exit 1
+fi
+
+if [ -d "$out_dir" ] && [ -n "$(ls -A "$out_dir")" ]; then
+  if [ "$force" -ne 1 ]; then
+    printf '%s\n' "Error: output directory is not empty: $out_dir (use --force to replace its chunk-*.txt files)" >&2
+    exit 1
+  fi
+  rm -f "$out_dir"/chunk-*.txt
+fi
+
 mkdir -p "$out_dir"
 
 printf '%s\n' "Splitting $input into chunks in $out_dir/" >&2
@@ -113,11 +135,6 @@ while IFS= read -r line || [ -n "$line" ]; do
       ;;
   esac
 done <"$input"
-
-if [ "$chunk_num" -eq 0 ]; then
-  printf '%s\n' "Error: no line starting with Human:, User: or Me: in $input" >&2
-  exit 1
-fi
 
 printf '%s\n' "Created $chunk_num chunks in $out_dir/" >&2
 

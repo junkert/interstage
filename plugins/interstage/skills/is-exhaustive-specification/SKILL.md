@@ -26,7 +26,7 @@ Small jobs may write a short section containing `N/A, <reason>`; never leave one
 - `S03` Glossary: one term per concept, used identically in every spec.
 
 **Quality**
-- `Q01` Test Strategy: project stage (prototype, production or other) and any threshold overrides, test types, tooling.
+- `Q01` Test Strategy: project stage (POC, MVP or production) and any threshold overrides, test types, tooling.
 - `Q02` Test Cases: concrete scenarios with inputs and expected results.
 - `Q03` Acceptance Criteria: becomes each TODO item's `done-when`; every criterion observable and pass/fail.
 - `Q04` Quality Gates: the gate definitions a verifier applies.

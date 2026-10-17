@@ -10,11 +10,11 @@ Find where documentation and code disagree. Every gap cites the documented claus
 
 ## Method
 
-1. **List documented items**: requirements, endpoints, operations, messages, types, fields, errors, constraints, component boundaries. Give each a stable ID (the spec's own ID or `path#anchor`).
-2. **Locate the implementation** for each item (below). Read the code; do not infer from names.
-3. **Compare** behavior, not just presence: parameters, types, required or optional, status codes, error bodies, defaults, limits, ordering.
-4. **Look the other way**: code behavior that no document mentions (routes, flags, fields, env vars).
-5. **Record** each gap in the table below with evidence. Items that match are counted, not listed.
+1. **List documented items**: requirements, endpoints, operations, messages, types, fields, errors, constraints, component boundaries, each with a stable ID (the spec's own, or `path#anchor`).
+2. **Locate the implementation** for each (below). Read the code; do not infer from names.
+3. **Compare** behavior, not just presence: parameters, types, required or optional, status codes, error bodies, defaults, limits.
+4. **Look the other way**: code behavior no document mentions (routes, flags, fields, env vars).
+5. **Record** each gap with evidence; count matches only.
 
 ## Gap types
 
@@ -60,7 +60,7 @@ Check only what the spec states: component boundaries, allowed dependency direct
 
 ## Output
 
-The gap table belongs in `$INTERSTAGE_STATE_DIR/missions/<id>/evidence/gaps.md`. You cannot write it: put the complete content in your report; the orchestrator records it through the mission tool.
+Your report carries the gap table; you cannot write files. Start your section with `## spec-gap <TODO-ID or scope>`. The orchestrator appends it to `$INTERSTAGE_STATE_DIR/missions/<id>/evidence/gaps.md` via `write_artifact kind=evidence name=gaps.md append=true`.
 
 ```
 ## Result

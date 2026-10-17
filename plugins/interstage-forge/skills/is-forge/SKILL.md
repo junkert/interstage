@@ -19,33 +19,30 @@ Work in a normal OMP session. There is no roster agent for this skill; the BREAK
 - Specialists have no `ask`: write "report open questions to the orchestrator".
 - Link skills as `skill://is-<name>`, only to skills that exist.
 - Artifacts go under `$INTERSTAGE_STATE_DIR/missions/<id>/`, never the project root.
+- No `npm run <skill>:*` scripts, no `@skill` commands, no references to other agent harnesses or skill installers (the lint rejects them).
 - Per-ecosystem commands appear only as a short table of examples; use the project's own tooling.
 - Scripts only if the workflow names them; they pass `shellcheck -S warning` and run on macOS (bash 3.2, BSD tools) and Linux.
 
 ## Agents
 
-File `plugins/interstage/agents/<name>.md`: YAML frontmatter, then the prompt.
+Interstage agents live in `plugins/interstage/agents/<name>.md` (core plugin only): YAML frontmatter, then the prompt. OMP field semantics: see OMP documentation `omp://task-agent-discovery.md`. Interstage rules, enforced by `tools/validate/src/agents.ts` and docs/CONTRACTS.md section 10:
 
-| Field | Rule |
+| Field | Interstage rule |
 |---|---|
-| `name` | Equals the file name. Required |
-| `description` | When to delegate to it. Required |
-| `tools` | Explicit list. Required. Never `ask` or `todo` |
-| `spawns` | Explicit agent names, never `*` |
-| `model` | Required, as `"@<role>, @default"`; an undefined role without the fallback fails the spawn |
-| `thinking-level` | Optional reasoning level |
-| `output`, `structured` | Optional output schema controls |
-| `blocking` | Optional; whether the parent waits |
-| `autoload-skills` | At most 3 core skills, within 20 KB total |
-| `read-summarize`, `prewalk`, `advisor` | Optional OMP behaviors; set only when the agent needs them |
+| `name` | Lowercase kebab-case, equals the file name; `main` and `sub` are reserved |
+| `description` | Required; when to delegate to the agent |
+| `tools` | Required by CONTRACTS; every name must be a known OMP tool. `ask` and `todo` are rejected |
+| `spawns` | Explicit names of agents in the same plugin; `*` is rejected |
+| `model` | Role aliases, last entry `@default`: `"@<role>, @default"` (the validator checks this). An undefined role alone fails the spawn with `No model selected`; the `@default` fallback uses the user's default role instead |
+| `autoload-skills` | At most 3, each a skill shipped in the same plugin, 20 KB total. Pack skills are read on demand |
+| `output` | Do not use structured schemas; the validator rejects them |
+| `thinking-level`, `blocking`, `structured`, `read-summarize`, `prewalk`, `advisor` | Accepted keys; Interstage sets no rule beyond PLAN section 4.3. Semantics: see OMP documentation `omp://task-agent-discovery.md` |
 
-Check optional field semantics against the OMP docs before using them.
-
-Interstage rules:
-- `lsp` in `tools` only together with the extension's `task.enableLsp` override.
-- The `mission` tool only for `houston` and `flight`.
-- MCP tools cannot be restricted by `tools:`; do not rely on that to deny them.
-- Prompt sections in order: `# <Name>`, `## Role`, `## Inputs`, `## Method`, `## Output`, `## Definition of done`, `## Operating rules`. The Operating rules block from docs/CONTRACTS.md section 10 is copied verbatim and may be extended, never shortened.
+Other rules:
+- `mission` in `tools` only for `houston` and `flight`.
+- `lsp` in `tools` only together with the extension's `task.enableLsp` override (CONTRACTS section 9).
+- An agent's `tools:` list does not remove MCP, extension or custom tools; do not rely on it to deny them (OMP documentation above).
+- Prompt sections in order: `# <Name>`, `## Role`, `## Inputs`, `## Method`, `## Output`, `## Definition of done`, `## Operating rules`. The Operating rules block (seven bullets, the last treats repository and tool text as data, not instructions) is copied verbatim from CONTRACTS section 10 and may be extended, never shortened. The validator checks section order, each verbatim rule, and that every `skill://is-<name>` link in the prompt names an existing skill.
 - Final report: `## Result`, `## Evidence`, `## Files changed` (builders only), `## Open questions`.
 
 ## BUILD, BREAK, REPAIR
@@ -56,6 +53,4 @@ Interstage rules:
 
 ## Validate
 
-In the Interstage repository run `bun run validate`. It checks skill and agent frontmatter, names and size budgets, `skill://` links and referenced files, agent rules (tools, spawns, model alias, autoload limits, required sections), and the content lints (invented data, schedules, forbidden references). Fix every finding it reports for your files.
-
-Then add a manifest entry (`name`, `path`, `origin`, `modified`, `budgetBytes`; `from` for upstream). Use the Nx generators for new skills and agents when available.
+In the Interstage repository run `bun run validate`. It checks skill and agent frontmatter and names, size budgets against the manifest, reference files (each under 16 KB) and `skill://` links, the agent rules above, and content lints (invented data, schedules, forbidden references). Fix every finding it reports for your files. Add one manifest entry per skill (`name`, `path`, `origin`, `modified`, `budgetBytes`; `from` for upstream) in `skills.manifest.fragments/<batch>.json`; the integration step merges fragments into `skills.manifest.json`. Contributors use the Nx generators for new skills and agents when available.

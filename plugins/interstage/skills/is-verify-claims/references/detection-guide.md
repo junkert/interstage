@@ -27,7 +27,7 @@ Language-neutral steps for finding incomplete work. Use the project's own toolin
 
 **Database and external services.** Do not trust that a connection variable is set. Run one real query or call through the project's own client against a local or test instance the project provides. If none exists, record the claim as unverified rather than mocking it.
 
-**Health endpoint.** Request it and read the body; a 200 from a static handler proves little. Then request a real feature path and compare the response with the spec.
+**Health endpoint.** Request it and read the body; a 200 from a static handler proves little. Then request a real feature path and compare the response with the spec. If the bash hook blocks `curl` or `wget` (network gate), use the language's HTTP client or the project's own CLI, or report the need as an open question.
 
 **Network reality.** To see whether a test touches the network or a real service, check the test's configuration (fixtures, recorded responses, container setup) and the dependency's logs. If you cannot tell, say so.
 

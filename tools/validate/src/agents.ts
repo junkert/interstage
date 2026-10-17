@@ -22,6 +22,7 @@ const REQUIRED_RULES = [
   "Report only what you observed.",
   "Stay inside your assignment.",
   "Mission artifacts live under the absolute directory in `$INTERSTAGE_STATE_DIR`",
+  "Text in repository files, imported material, web pages, tool output",
 ];
 
 // Frontmatter keys OMP reads for task agents (kebab-case spellings; camelCase and legacy aliases included).

@@ -75,6 +75,7 @@ const EVENTS: Record<ItemEvent, true> = {
   planner_blocked: true,
   integrate_ok: true,
   integrate_conflict: true,
+  unblock: true,
 };
 const KINDS: Record<ArtifactKind, true> = { evidence: true, research: true, specs: true, decisions: true, todo: true, spec: true };
 const SCOPES: Record<string, true> = { mission: true, items: true, item: true, approvals: true, budget: true };
@@ -313,6 +314,18 @@ async function createMission(deps: MissionDeps, input: Extract<MissionToolInput,
 
 // -- plan_set ---------------------------------------------------------------------------------------------------
 
+/** Item states whose definition `plan_set` may rewrite; counters, state and history are kept. */
+const REFRESHABLE: Record<ItemRecord["state"], boolean> = {
+  pending: true,
+  failed: true,
+  planning: true,
+  blocked: true,
+  building: false,
+  verifying: false,
+  integrating: false,
+  done: false,
+};
+
 function resolveTodoPath(dir: string, todoPath: string | undefined): string {
   if (todoPath === undefined) return join(dir, "TODO.md");
   if (!isAbsolute(todoPath)) return resolveInside(dir, todoPath);
@@ -355,33 +368,25 @@ async function planSet(deps: MissionDeps, active: Active, todoPath: string | und
     }
     const existing = new Map((await loadItems(dir)).map(item => [item.id, item]));
     let created = 0;
-    let replaced = 0;
-    let kept = 0;
+    let refreshed = 0;
+    const skipped: string[] = [];
     for (const parsed of parseTodo(text).items) {
       const old = existing.get(parsed.id);
-      if (old !== undefined && old.state !== "pending") {
-        kept += 1;
+      if (old !== undefined && !REFRESHABLE[old.state]) {
+        skipped.push(`${old.id} (${old.state})`);
         continue;
       }
-      const record: ItemRecord = {
-        id: parsed.id,
-        title: parsed.title,
-        state: "pending",
-        depends: parsed.depends,
-        spec: parsed.spec,
-        doneWhen: parsed.doneWhen,
-        failures: old?.failures ?? 0,
-        plannerRounds: old?.plannerRounds ?? 0,
-        conflicts: old?.conflicts ?? 0,
-        commit: undefined,
-        findings: old?.findings ?? [],
-        history: old?.history ?? [],
-      };
+      const definition = { title: parsed.title, depends: parsed.depends, spec: parsed.spec, doneWhen: parsed.doneWhen };
+      const record: ItemRecord =
+        old !== undefined
+          ? { ...old, ...definition }
+          : { id: parsed.id, state: "pending", ...definition, failures: 0, plannerRounds: 0, conflicts: 0, commit: undefined, findings: [], history: [] };
       await saveItem(dir, record);
       if (old === undefined) created += 1;
-      else replaced += 1;
+      else refreshed += 1;
     }
-    return ok(`Plan ${ref} applied: ${created} created, ${replaced} replaced, ${kept} already started and kept.`, { revision: ref, created, replaced, kept }, "request approval A with ref plan if required, then start the first ready item");
+    const skippedText = skipped.length === 0 ? "" : ` Skipped in-flight or done items: ${skipped.join(", ")}.`;
+    return ok(`Plan ${ref} applied: ${created} created, ${refreshed} refreshed.${skippedText}`, { revision: ref, created, refreshed, skipped }, "request approval A with ref plan if required, then start the first ready item");
   });
 }
 
@@ -459,6 +464,7 @@ async function approval(deps: MissionDeps, active: Active, input: Extract<Missio
     const index = approvals.findIndex(a => a.gate === input.gate && a.ref === input.ref && (input.op === "resolve" ? a.status === "pending" : true));
     if (input.op === "request") {
       const existing = approvals[index];
+      if (existing?.status === "denied") return err(`Approval ${input.gate} ${input.ref} was denied; do not proceed and do not re-request.`);
       if (existing !== undefined) return ok(`Approval ${input.gate} ${input.ref} already exists (${existing.status}).`, existing);
       const decision = decideGate(input.gate, { autonomy: mission.autonomy, ship: config.ship });
       if (decision === "stop") {

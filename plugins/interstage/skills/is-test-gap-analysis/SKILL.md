@@ -59,7 +59,7 @@ For each blocker or major gap, state the test to add: behavior under test, level
 
 ## Output
 
-Gaps go in `$INTERSTAGE_STATE_DIR/missions/<id>/evidence/gaps.md`. You cannot write it yourself: include the complete content in your report and the orchestrator records it.
+Your report carries the gap table; you cannot write files. Start your section with the heading `## test-gap <TODO-ID or scope>`. The orchestrator appends it to `$INTERSTAGE_STATE_DIR/missions/<id>/evidence/gaps.md` with `write_artifact kind=evidence name=gaps.md append=true`.
 
 ```
 ## Result

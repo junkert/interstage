@@ -51,6 +51,12 @@ describe("classifyCommand", () => {
       expect(kinds(c)).toEqual(["D:network"]);
     }
   });
+  test("registry audits and docker pull/build are network", () => {
+    for (const c of ["npm audit", "yarn audit", "pnpm audit --prod", "bun audit", "cargo audit", "pip-audit -r r.txt", "docker pull alpine", "docker build ."]) {
+      expect([c, kinds(c)]).toEqual([c, ["D:network"]]);
+    }
+    expect(kinds("docker ps")).toEqual([]);
+  });
   test("merge only for omp/task branches", () => {
     expect(kinds("git merge --squash omp/task/T-001")).toEqual(["E:merge"]);
     expect(kinds("git merge main")).toEqual([]);

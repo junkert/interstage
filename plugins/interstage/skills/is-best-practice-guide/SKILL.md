@@ -18,14 +18,14 @@ license: MIT
 - Use the `web_search` tool and Context7 documentation tools if present.
 - Prefer official documentation, style guides, framework recommendations, security standards and recognized industry sources.
 - Cross-check at least two sources for any claim you recommend.
-- Record each source with URL and what it supports. Cite sources and prioritize by impact.
+- Record each source with URL and what it supports.
 
 ## Report (in the specialist report)
 
 For each gap, in priority order:
 
 - topic
-- impact (critical, high, medium, low) and why
+- impact (critical, high, medium, low) and why; this is a priority for research, not a finding severity
 - evidence of the gap
 - recommendation, with cited sources
 - open questions

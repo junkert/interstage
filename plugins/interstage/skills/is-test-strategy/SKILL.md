@@ -40,9 +40,9 @@ Project size and risk adjust the table: a hobby MVP lowers unit depth, a paid or
 | User workflows | end to end | `skill://is-testing-e2e` |
 | Interface contracts | API and contract tests | `skill://is-testing-integration` |
 | Regression safety | the full existing suite, selected by change impact | `skill://is-test-pipeline` |
-| Performance, capacity | load and stress tests | `skill://is-performance-profiling` |
+| Performance, capacity | load and stress tests | `skill://is-performance-profiling` (pack skill, if installed) |
 | Security | static review, dependency audit, authorization tests | `skill://is-security-review` |
-| Accessibility, UI quality | static checklist plus the project's own tool if present | `skill://is-web-review` |
+| Accessibility, UI quality | static checklist plus the project's own tool if present | `skill://is-web-review` (pack skill, if installed) |
 | Compatibility | browser and device matrix | `skill://is-testing-e2e` |
 | Resilience | chaos tests, only when opted in and monitoring exists | `skill://is-test-pipeline` prerequisites |
 
@@ -55,7 +55,7 @@ Usability testing needs human participants; it is out of scope.
 | Every commit | unit tests |
 | Every pull request | integration tests, plus the commit-level set |
 | Every release | system tests: end to end, performance, security checks, compatibility |
-| After every deploy | smoke |
+| After every deploy | smoke against the deployed target (the release-level smoke in `skill://is-test-pipeline`) |
 
 Run order inside a cadence step is in `skill://is-test-pipeline`.
 
@@ -74,4 +74,4 @@ Write the plan with these headings and nothing else.
 - Do not include schedules, headcounts, maturity scores or exported tickets.
 - Do not report numbers you did not measure. Coverage comes from the project's coverage tool output.
 - Findings about a missing or inadequate test layer use blocker, major, minor, nit, each with evidence (file:line, command output or a quoted spec clause). No quota.
-- Write the plan under `$INTERSTAGE_STATE_DIR/missions/<id>/`, or in the path a TODO item names.
+- Return the plan in your report; the orchestrator records it under `$INTERSTAGE_STATE_DIR/missions/<id>/`, or the SPEC owner writes it into Q01. Write a file yourself only at a path a TODO item names.

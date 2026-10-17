@@ -6,7 +6,7 @@ license: MIT
 
 # Tracing and log correlation
 
-Correlate through the standard: OpenTelemetry creates spans and a logging bridge copies the active `trace_id` and `span_id` into every log line. Do not hand-roll spans as log records or build your own id scheme.
+Correlate through the standard: OpenTelemetry creates spans and a logging bridge copies the active trace and span ids into every log line. Field names differ by library (table below); map them to `trace_id` and `span_id` in the output. Do not hand-roll spans as log records or build your own id scheme.
 
 ## W3C `traceparent`
 
@@ -31,7 +31,7 @@ Check each boundary: the trace breaks where nothing injects or extracts.
 
 | Language | Auto-instrumentation entry point | Log correlation |
 |---|---|---|
-| Python | `opentelemetry-instrument python app.py` (package `opentelemetry-distro`) | `opentelemetry-instrumentation-logging` adds trace and span ids to log records |
+| Python | `opentelemetry-instrument python app.py` (package `opentelemetry-distro`) | `opentelemetry-instrumentation-logging` sets `otelTraceID`, `otelSpanID` on records, not `trace_id`; use them in the format (`set_logging_format=True`) or copy them in the JSON formatter |
 | Java | `-javaagent:opentelemetry-javaagent.jar` | agent places `trace_id`, `span_id` in MDC; reference them in the layout |
 | Node.js | `node --require @opentelemetry/auto-instrumentations-node/register app.js` | pino and winston instrumentations add `trace_id`, `span_id` |
 | Go | no agent; wrap handlers and clients with `otelhttp` and similar libraries | read `trace.SpanContextFromContext(ctx)` and add its ids to log attributes |
@@ -40,34 +40,28 @@ Check each boundary: the trace breaks where nothing injects or extracts.
 
 ```python
 from opentelemetry import trace
-from opentelemetry.trace import Status, StatusCode
 
 tracer = trace.get_tracer(__name__)
 
 def process_payment(order_id, amount):
     with tracer.start_as_current_span("process_payment") as span:
         span.set_attribute("order_id", order_id)
-        try:
-            return charge(order_id, amount)
-        except Exception as e:
-            span.record_exception(e)
-            span.set_status(Status(StatusCode.ERROR, str(e)))
-            raise
+        return charge(order_id, amount)
 ```
 
-Logs written inside the `with` block carry this span's ids through the bridge.
+`start_as_current_span` already records an escaping exception and sets ERROR status, so no try/except. Logs inside the `with` block carry this span's ids.
 
 ## Sampling
 
-Use a parent-based sampler so every service honors the upstream decision: `OTEL_TRACES_SAMPLER=parentbased_traceidratio` with `OTEL_TRACES_SAMPLER_ARG=<ratio between 0 and 1>`. The ratio is a project decision; do not sample ERROR logs themselves (see `skill://is-structured-logging`).
+Use a parent-based sampler so every service honors the upstream decision: `OTEL_TRACES_SAMPLER=parentbased_traceidratio` with `OTEL_TRACES_SAMPLER_ARG=<ratio 0 to 1>`. The ratio is a project decision; never sample ERROR logs (see `skill://is-structured-logging`).
 
 ## Log field names
 
-When reading logs from mixed sources, treat these as aliases of one field: `trace_id`, `trace.id`, `traceId`, `X-Trace-Id`. Normalize to `trace_id` and `span_id` in your own output.
+Treat `trace_id`, `trace.id`, `traceId`, `X-Trace-Id`, `otelTraceID` as one field when reading mixed logs; output `trace_id` and `span_id`.
 
 ## Checklist
 
 - Every outbound call and consumer injects or extracts context.
-- Logs contain `trace_id` and `span_id` while a span is active; check one real line.
+- Logs carry trace and span ids while a span is active; check one line.
 - Context survives thread pools and async tasks.
 - Report breaks with `file:line` of the boundary that does not propagate.

@@ -90,6 +90,17 @@ describe("caller permissions", () => {
     }
   });
 
+  test("unblock is a transition event for flight and houston, and needs a note", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    await saveItem(dir, { ...(await loadItems(dir))[0]!, state: "blocked", failures: 3 });
+    expect("input" in parseMissionInput({ action: "transition", itemId: "T-001", event: "unblock", note: "n" })).toBe(true);
+    expect((await call(sb, "flight", { action: "transition", itemId: "T-001", event: "unblock" })).ok).toBe(false);
+    expect((await call(sb, "houston", { action: "transition", itemId: "T-001", event: "unblock", note: "user decided" })).ok).toBe(true);
+    expect((await loadItems(dir))[0]).toMatchObject({ state: "pending", failures: 0 });
+  });
+
   test("houston may also transition (fast lane); fido may not", async () => {
     const sb = await sandbox();
     await newMission(sb);
@@ -120,6 +131,16 @@ describe("approval request and autonomy", () => {
     expect(result.text).toContain("proceed");
     expect(result.next).toBeUndefined();
     expect((await loadApprovals(dir))[0]).toEqual({ gate: "D", ref: "npm install", status: "granted", requestedBy: "flight", requestedAt: CLOCK, resolvedAt: CLOCK, note: "auto-granted: autonomy allows this gate" });
+  });
+
+  test("a denied request is an error: do not proceed and do not re-request", async () => {
+    const sb = await sandbox("autonomy: supervised\n");
+    const dir = await newMission(sb);
+    await call(sb, "flight", { action: "approval", op: "request", gate: "D", ref: "npm install" });
+    await call(sb, "main", { action: "approval", op: "resolve", gate: "D", ref: "npm install", status: "denied" });
+    const again = await call(sb, "flight", { action: "approval", op: "request", gate: "D", ref: "npm install" });
+    expect(again).toMatchObject({ ok: false, text: expect.stringContaining("was denied; do not proceed and do not re-request") });
+    expect(await loadApprovals(dir)).toHaveLength(1);
   });
 
   test("approve: stays pending and tells the caller to wait", async () => {
@@ -244,6 +265,35 @@ describe("plan_set", () => {
     const items = await loadItems(dir);
     expect(items[0]).toMatchObject({ state: "building", title: "started" });
     expect(items[1]).toMatchObject({ state: "pending", title: "Second thing, revised", plannerRounds: 1 });
+  });
+
+  test("refreshes definitions of pending, failed, planning and blocked items, keeping state and counters", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    const base = (await loadItems(dir))[0]!;
+    for (const state of ["pending", "failed", "planning", "blocked"] as const) {
+      await saveItem(dir, { ...base, state, failures: 2, plannerRounds: 1, conflicts: 1, commit: "c0", findings: [BLOCKER], history: [{ at: CLOCK, event: "start", from: "pending", to: "building" }] });
+      await call(sb, "houston", { action: "write_artifact", kind: "todo", name: "", content: TODO.replace("First thing", `First ${state}`).replace("one works", `one works ${state}`) });
+      const result = await call(sb, "flight", { action: "plan_set" });
+      expect(result.ok).toBe(true);
+      expect((await loadItems(dir))[0]).toMatchObject({ state, title: `First ${state}`, doneWhen: [`one works ${state}`], failures: 2, plannerRounds: 1, conflicts: 1, commit: "c0", findings: [BLOCKER] });
+      expect((await loadItems(dir))[0]?.history).toHaveLength(1);
+    }
+  });
+
+  test("never touches building, verifying, integrating or done items, and reports them as skipped", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    const base = (await loadItems(dir))[0]!;
+    for (const state of ["building", "verifying", "integrating", "done"] as const) {
+      await saveItem(dir, { ...base, state, title: "original" });
+      await call(sb, "houston", { action: "write_artifact", kind: "todo", name: "", content: TODO.replace("First thing", "Changed") });
+      const result = await call(sb, "flight", { action: "plan_set" });
+      expect(result.text).toContain(`T-001 (${state})`);
+      expect((await loadItems(dir))[0]).toMatchObject({ state, title: "original" });
+    }
   });
 
   test("a todoPath outside the mission directory is rejected", async () => {

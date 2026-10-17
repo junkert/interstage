@@ -11,20 +11,20 @@ Scope: framework or language version upgrades, framework-to-framework moves, arc
 ## Rules
 
 1. Run the project's tests and build first and record the baseline (pass, fail, skipped) before any change.
-2. One verified step per commit on the task branch. Message `<TODO-ID>: <imperative title>`; the orchestrator squashes.
-3. The build and tests are green at each commit. If a step breaks them and you cannot fix it in the step, revert inside the worktree.
-4. Codemods first: use `ast_edit` and the official migration tool of the framework, then hand-edit what remains.
-5. Never mix a dependency upgrade and a code migration in one commit.
-6. One dependency per commit, lockfile updated in the same commit.
+2. Commit each verified step on the task branch. Checkpoint commits are allowed; the message is exactly `<TODO-ID>`. The orchestrator squashes at integration.
+3. The build and tests are green at each commit. If a step breaks them and you cannot fix it within the step, revert inside your own isolated checkout.
+4. Codemods first: use `ast_edit` and the framework's official migration tool, then hand-edit what remains.
+5. Never mix a dependency upgrade and a code migration in one commit. Exception: if a breaking upgrade cannot compile without code changes, add a compatibility layer first, or let the bump commit carry the minimal required fixes and nothing else.
+6. One dependency per commit with the lockfile updated in the same commit, except dependencies that require each other's version (for example a framework and its companion or `@types` packages).
 7. Bump to the nearest safe version first, then step toward the target. Never skip majors without reading each changelog.
 8. Security upgrades first. Security claims need the registry advisory id as evidence.
-9. Package installs and downloads are gate D: report them as open questions unless the assignment says approved.
+9. Package installs and downloads are gate D, and `outdated` queries are network calls: report them as open questions unless the assignment says approved.
 10. Removing old code is the last step and its own commit.
 11. After 3 failed attempts on one step, stop and report BLOCKED with the evidence.
 
 ## Migration ledger
 
-Keep `$INTERSTAGE_STATE_DIR/missions/<id>/evidence/migration-ledger.md` (the orchestrator writes it from your report). It lists done items with commit ids, remaining items in order, the baseline result, and open questions. A fresh agent must be able to resume from it after a context reset. Report each ledger update in the specialist report.
+The assignment passes the ledger path under a `Ledger` heading: `$INTERSTAGE_STATE_DIR/missions/<id>/evidence/<ID>/ledger.md`. Read it first if it exists. It lists the baseline result, done items (by `<TODO-ID>` and step title, not commit ids, since task-branch commits are squashed), remaining items in order, and open questions. A fresh agent must be able to resume from it after a context reset. Put every update in a `## Ledger update` section of your report; the orchestrator writes the file.
 
 ## Step order
 
@@ -73,7 +73,7 @@ API signature changes, removed or renamed APIs, behavior and default changes, co
 | JavaScript | package.json, lockfile of the project's manager | `npm outdated` |
 | Python | pyproject.toml or requirements, lock file | `pip list --outdated` |
 | Go | go.mod, go.sum | `go list -u -m all` |
-| Rust | Cargo.toml, Cargo.lock | `cargo update --dry-run` |
+| Rust | Cargo.toml, Cargo.lock | `cargo update --dry-run` (within ranges only) |
 | Java | pom.xml or build.gradle | build tool's versions plugin |
 | Ruby | Gemfile.lock | `bundle outdated` |
 | .NET | csproj | `dotnet list package --outdated` |
@@ -93,7 +93,7 @@ Use the project's own manager; these are examples only.
 
 ## Practices
 
-- Pin exact versions for the migration and read lockfile diffs.
+- Follow the project's pinning policy and read lockfile diffs.
 - Test the upgraded dependency's actual usage paths, not only the suite.
 - Record each decision and rationale in the ledger.
 - Keep deprecation warnings at or below baseline.

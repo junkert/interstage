@@ -252,6 +252,26 @@ describe("/interstage:doctor", () => {
     expect(report).toContain("none of the known markers");
   });
 
+  test("reports whether the active mission id resolves and lists unfinished missions", async () => {
+    const sb = await sandbox();
+    for (const [id, status] of [["M-001", "paused"], ["M-002", "complete"], ["M-003", "running"]] as const) {
+      const dir = join(sb.stateDir, "missions", id);
+      await mkdir(dir, { recursive: true });
+      await saveMission(dir, mission({ id, status, title: `title ${id}` }));
+    }
+    const none = await doctorReport(doctorEnv(sb, [], {}));
+    expect(none).toContain("Active mission: none");
+    expect(none).toContain("- M-001 (paused): title M-001");
+    expect(none).toContain("- M-003 (running)");
+    expect(none).not.toContain("- M-002");
+    const good = doctorEnv(sb, [], {});
+    good.env.INTERSTAGE_MISSION_ID = "M-003";
+    expect(await doctorReport(good)).toContain("Active mission: M-003 (running");
+    const bad = doctorEnv(sb, [], {});
+    bad.env.INTERSTAGE_MISSION_ID = "M-009";
+    expect(await doctorReport(bad)).toContain("M-009 does NOT resolve");
+  });
+
   test("never writes anything", async () => {
     const sb = await sandbox();
     const before = await git(sb.repo, "status", "--porcelain", "--ignored");

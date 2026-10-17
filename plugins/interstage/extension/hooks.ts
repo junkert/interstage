@@ -133,7 +133,7 @@ export function createHooks(deps: HookDeps) {
       for (const item of classified) {
         const decision = decideGate(item.gate, { autonomy, ship: config.ship });
         if (decision === "allow") continue;
-        const task = item.gate === "E" ? /omp\/task\/([\w.-]+)/.exec(item.ref)?.[1] : undefined;
+        const task = item.gate === "E" ? /omp\/task\/(T-\d{3,})(?:-\d+)?(?![\w-])/.exec(item.ref)?.[1] : undefined;
         const ref = task === undefined ? item.ref : `merge:${task}`;
         if (decision === "approve" && [ref, item.ref, whole].some(candidate => hasApproval(approvals, item.gate, candidate))) continue;
         return { block: true, reason: blockReason(item.gate, item.kind, ref) };

@@ -31,8 +31,14 @@ Static review of SQL, ORM code and migrations. Findings need `file:line` evidenc
 - Prefix redundancy: `(a)` is redundant when `(a, b)` exists; flag it for removal.
 - Partial index for a hot filtered subset (for example `WHERE status = 'pending'`).
 - Queue workers claiming rows use `FOR UPDATE SKIP LOCKED`.
-- Migrations: create indexes with `CREATE INDEX CONCURRENTLY` where the engine supports it (PostgreSQL; note it cannot run inside a transaction block), and ship the matching rollback (`DROP INDEX CONCURRENTLY`).
+- Migrations: create indexes with `CREATE INDEX CONCURRENTLY` where the engine supports it (PostgreSQL), and ship the matching rollback (`DROP INDEX CONCURRENTLY`). It cannot run inside a transaction block, and migration frameworks usually wrap each migration in one, so check that the framework's transaction wrapping is disabled for that migration. A failed concurrent build leaves an INVALID index: drop it and rebuild.
 
 ## Measuring
 
-Run `EXPLAIN` (`EXPLAIN ANALYZE` on PostgreSQL, `EXPLAIN ANALYZE` on MySQL 8.0.18+, `EXPLAIN` on SQLite as `EXPLAIN QUERY PLAN`) only against a local or test database the project provides. Never connect to production. Measure before and after a change and report both real outputs; without a database, label the finding [INFERENCE].
+Run plans only against a local or test database the project provides. Never connect to production.
+
+- PostgreSQL: `EXPLAIN` shows the plan without running the statement. `EXPLAIN ANALYZE` executes it, so for INSERT, UPDATE or DELETE wrap it in `BEGIN; ... ROLLBACK;` or use plain `EXPLAIN`.
+- SQLite: `EXPLAIN QUERY PLAN <statement>`.
+- MySQL: `EXPLAIN` is available; whether `EXPLAIN ANALYZE` exists and which statements it accepts depends on the version, so check the engine version first.
+
+Measure before and after a change and report both real outputs; without a database, label the finding [INFERENCE].

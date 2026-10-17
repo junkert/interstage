@@ -241,6 +241,21 @@ describe("tool_call gates", () => {
     expect(await hooksFor(open.env).hooks.toolCall(bash("git merge --squash omp/task/T-014"), sub)).toBeUndefined();
   });
 
+  test("gate E strips OMP's retry suffix: omp/task/T-014-2 needs merge:T-014", async () => {
+    const sb = await sandbox();
+    const dir = await withMission(sb, { autonomy: "supervised" });
+    const { hooks } = hooksFor(sb.env);
+    const sub = ctxOf("sub", "flight").ctx;
+    for (const branch of ["T-014", "T-014-2", "T-014-3"]) {
+      const blocked = await hooks.toolCall(bash(`git merge --squash omp/task/${branch}`), sub);
+      expect(blocked?.block).toBe(true);
+      expect(blocked?.reason).toContain("merge:T-014");
+    }
+    await saveApprovals(dir, [granted("E", "merge:T-014")]);
+    for (const branch of ["T-014", "T-014-2", "T-014-3"]) expect(await hooks.toolCall(bash(`git merge --squash omp/task/${branch}`), sub)).toBeUndefined();
+    expect(await hooks.toolCall(bash("git merge --squash omp/task/T-0145-2"), sub)).toMatchObject({ block: true });
+  });
+
   test("gate F: ship commands need approval in supervised and checkpoints; autopilot stops unless ship is allowed", async () => {
     for (const autonomy of ["supervised", "checkpoints"] as const) {
       const sb = await sandbox();

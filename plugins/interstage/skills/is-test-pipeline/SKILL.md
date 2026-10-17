@@ -6,7 +6,7 @@ license: MIT
 
 # Test pipeline
 
-One order for running tests, the rules that gate each step, and how to select tests for a change. Commands always come from the project: `package.json` scripts, `Makefile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, CI config, or `interstage.yml` `verify.command`. Never invent a command. If a layer has no command, report "not configured" instead of skipping silently.
+One order for running tests, the rules that gate each step, and how to select tests for a change. Commands come from the project: `package.json` scripts, `Makefile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, CI config, or `interstage.yml` `verify.command`. Never invent one; if a layer has no command, report "not configured".
 
 ## Order
 
@@ -17,9 +17,8 @@ One order for running tests, the rules that gate each step, and how to select te
 
 Reasons, in the places where the sources disagreed:
 
-- Smoke runs before everything because it is the cheapest check that the build and environment are usable. Unit tests are not a prerequisite for smoke: smoke checks the running system, unit tests check code in isolation.
-- Security checks that need a deployed application run after end to end, in the same stage as performance, because they need the same stable deployed target. Static security review needs no deployment and can run any time (`skill://is-security-review`).
-- Security does not run in parallel with end to end on one environment: concurrent scanning perturbs both results.
+- Smoke runs first because it is the cheapest check that the build and environment are usable. Unit tests are not its prerequisite: smoke checks the running system, unit tests check code in isolation.
+- Security checks that need a deployed application run after end to end, in the performance stage, since both need the same stable target and concurrent scanning perturbs end to end results. Static security review needs no deployment (`skill://is-security-review`).
 
 ## Prerequisites
 
@@ -33,14 +32,27 @@ Reasons, in the places where the sources disagreed:
 
 ## Fail fast
 
-When a prerequisite fails, stop the stages that depend on it and report which step failed and which were not run. Do not run expensive stages on a broken base. Independent stages that do not depend on the failure may finish, so one run reports everything that can be known.
+When a prerequisite fails, stop the stages that depend on it and report which step failed and which did not run. Independent stages may finish, so one run reports everything knowable.
 
 ## Smoke
 
 - 5 to 10 scenarios, about 2 minutes or less.
 - Cover: the application starts and responds, the database connects, authentication works, one core operation works.
 - Idempotent, no side effects, no leftover data.
-- Clear pass or fail. A flaky smoke test is a defect in the smoke suite; fix it.
+- Clear pass or fail. A flaky smoke test is a suite defect; fix it.
+
+Two scopes, one suite:
+
+- **Item smoke**: during verification of one item, start the application or the smallest runnable slice locally in the verification worktree and run the smoke scenarios against it.
+- **Release smoke**: run against the deployed target; this is the "after every deploy" cadence row in `skill://is-test-strategy`.
+
+Item smoke is the "smoke first" step for an item; release smoke, for a release.
+
+## Verification policy
+
+- `lsp` diagnostics count toward a clean verdict only when the tool and a language server for the changed files are available. Otherwise record a `minor` finding `lsp unverified` and continue, unless Q01 or the assignment requires diagnostics (then `major`).
+- A `done-when` condition that cannot be verified is `major`.
+- Flaky tests (fail then pass on rerun with no code change) are findings, never retried to green, quarantined, skipped or deleted to pass. Major if they can mask a real failure, else minor. Evidence: test name and both outputs.
 
 ## Change-impact selection
 
@@ -54,24 +66,14 @@ Run the full suite when a change touches shared infrastructure, configuration, d
 | UI component | its tests plus end to end paths that render it |
 | Lockfile or dependency version | full suite |
 
-Use the project's own mechanism if it has one (path filters, test-affected tooling, a build graph). Otherwise derive the list from `git diff --name-only` and the import graph.
+Use the project's own mechanism if it has one (path filters, test-affected tooling, build graph); otherwise use `git diff --name-only` and the import graph.
 
 ## Dependency types
 
-Record which of these constrain a test before ordering it:
+Record which constrain a test before ordering it: **execution** (B needs A to pass), **environment** (local, CI, staging, production-like), **data** (fixtures, seeds, accounts), **resource** (CPU, memory, ports, shared service), **temporal** (rate limits, windows).
 
-1. **Execution**: test B needs test A to pass first.
-2. **Environment**: needs a specific environment (local, CI, staging, production-like).
-3. **Data**: needs fixtures, seeds or accounts.
-4. **Resource**: competes for CPU, memory, ports or a shared service, so it cannot run in parallel with others.
-5. **Temporal**: has timing constraints such as a rate limit or a window.
-
-Two tests that share mutable state or a resource run sequentially. A cycle in the dependencies is a defect to report.
-
-## Flaky tests
-
-A test that fails then passes on rerun with no code change is flaky. Record it as a finding (severity major if it can mask a real failure, otherwise minor) with evidence: the test name and the failing and passing outputs. Never auto-retry to reach green, never quarantine, skip or delete it to pass the gate. A retry done once to establish flakiness is evidence, not a fix.
+Tests that share mutable state or a resource run sequentially. A dependency cycle is a defect to report.
 
 ## Report
 
-Reports are pass or fail per stage with the command run and its real output excerpt. State which stages did not run and why. Do not state that a build is safe to deploy; shipping is a gate decision outside this skill. Related: `skill://is-test-strategy`, `skill://is-testing-integration`, `skill://is-testing-e2e`.
+Pass or fail per stage, with the command run and a real output excerpt; say which stages did not run and why. Never state a build is safe to deploy; shipping is a gate decision. Related: `skill://is-test-strategy`, `skill://is-testing-integration`, `skill://is-testing-e2e`.

@@ -11,7 +11,7 @@ license: MIT
 - Derive docs from what exists: `openapi.yaml`, `.proto` files, `schema.graphql`, and code annotations. Do not describe behavior no source shows.
 - Cite `file:line` for every documented behavior (route, field, status code, auth rule, limit).
 - Mark unknowns as `Unknown: <what is missing>` instead of inventing them. Report open questions to the orchestrator.
-- Examples must be runnable against the project's own tests or fixtures, never a live service. Name the test that exercises each example; if none does, mark the example unverified.
+- Take examples from the project's tests or fixtures when they exist and name the test; otherwise mark the example unverified. Never call a live service.
 - Write only to paths a TODO item names. Otherwise put drafts in the report.
 
 ## Checklist
@@ -30,16 +30,17 @@ Also cover for the whole API: auth setup, error format, pagination and idempoten
 
 Compare the spec with the implementation and report each mismatch as a finding:
 
-- Title, severity (blocker, major, minor, nit), spec location (file:line), implementation location (file:line), and what differs.
-- Typical drift: routes or fields in code but not the spec (or reverse), differing types or required flags, undocumented status codes, auth in code absent from the spec.
+- Title, severity, spec location (file:line), implementation location (file:line), and what differs.
+- Severity: auth mismatches, removed or undocumented behavior, and type or required-flag mismatches are major; wording differences are minor; cosmetic issues are nits. Use blocker only when callers would break or be exposed.
+- Typical drift: routes or fields in code but not the spec (or reverse), undocumented status codes, auth in code absent from the spec.
 - No evidence, no finding. A clean result is valid.
 
 ## What readers need
 
-- A first working call from the documented auth.
 - Every parameter and field explained once, with constraints.
 - Error meanings with what the caller should do.
 - Breaking changes called out with migration steps.
+- A first call, only if a test or fixture cited in the repo shows one.
 
 ## Reference specs
 

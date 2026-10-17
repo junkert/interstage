@@ -28,10 +28,10 @@ Groups: client, user, time, method, path, protocol, status, bytes, referer, agen
 
 ## Multi-line events
 
-A line that does not start with the event-start pattern (usually the timestamp) belongs to the previous event. Join before counting, otherwise each stack frame counts as an event:
+A line that does not start with the event-start pattern (usually the timestamp) belongs to the previous event. Join before counting, otherwise each stack frame counts as an event. Write digits out; `{n}` intervals are not portable in awk (BSD awk, mawk):
 
 ```
-awk '/^[0-9]{4}-[0-9]{2}-[0-9]{2}/ {if (e) print e; e=$0; next} {e=e " | " $0} END {if (e) print e}' app.log
+awk '/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ {if (e) print e; e=$0; next} {e=e " | " $0} END {if (e) print e}' app.log
 ```
 
 ## Time

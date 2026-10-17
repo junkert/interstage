@@ -6,12 +6,12 @@ license: MIT
 
 # Web review
 
-Static review of markup, components and style tokens. Automated tools catch only 30-40% of accessibility issues, so a clean tool run is not a clean review. Report open questions to the orchestrator.
+Static review of markup, components and style tokens. Automated tools catch only part of the accessibility issues, so a clean tool run is not a clean review. Report open questions to the orchestrator.
 
 ## Method
 
 1. Find templates, components and CSS or design-token files with `grep`.
-2. If the project already has axe or pa11y (check `package.json` and CI config), run it with the project's own command. If not, do not install anything; use the built-in OMP browser tool for a keyboard walk (Tab, Shift+Tab, Enter, Space, Escape) of the affected page.
+2. If the project already has axe or pa11y (check `package.json` and CI config), run it with the project's own command; do not install anything. For keyboard behavior (Tab, Shift+Tab, Enter, Space, Escape), use a browser tool only if your assignment names one. Otherwise mark keyboard findings [INFERENCE] and report the missing browser as an open question.
 3. Walk the checklist. Record each hit as: title, severity, evidence (`file:line`), WCAG SC.
 4. Fix order when asked to remediate: keyboard traps, missing labels, insufficient contrast, then the rest.
 
@@ -26,9 +26,10 @@ Static review of markup, components and style tokens. Automated tools catch only
 | Keyboard | `onClick` on `div` or `span` without `role` and `tabindex` plus key handler; positive `tabindex`; focus traps in modals with no Escape | 2.1.1, 2.1.2 |
 | Focus visible | `outline: none` or `outline: 0` without a replacement style | 2.4.7 |
 | Contrast | design-token pairs below 4.5:1 for normal text (3:1 for large text and UI components); compute from the token values | 1.4.3, 1.4.11 |
+| Target size | interactive targets under 24x24 CSS px with no exception (spacing, inline text, equivalent control, user-agent-sized); 44x44 is AAA (2.5.5), so do not report it as AA | 2.5.8 |
 | Page language and title | missing `lang` on `<html>`, missing or generic `<title>` | 3.1.1, 2.4.2 |
 
-Use the WCAG 2.2 AA numbering. Do not report a touch-target size as an AA failure; the 2.2 AA minimum (2.5.8) is a separate, smaller rule, so cite it only after checking the actual text.
+Use the WCAG 2.2 AA numbering.
 
 ## React checks (evidence required)
 
@@ -39,4 +40,4 @@ Use the WCAG 2.2 AA numbering. Do not report a touch-target size as an AA failur
 
 ## Output
 
-Per finding: `severity`, title, `file:line`, WCAG SC, the fix in one line. No findings quota; "no findings" is valid. Mark anything you inferred without running a browser as [INFERENCE].
+Per finding: `severity`, title, `file:line`, WCAG SC, the fix in one line. No findings quota; "no findings" is valid. Mark anything you inferred without running it in a browser as [INFERENCE].

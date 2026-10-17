@@ -28,6 +28,7 @@ Order items by: likelihood wrong, impact if wrong, cost to test (cheap first amo
 
 ## 4. Record
 Per item:
+- `title`: short label for the item
 - `location`
 - `claim`: what is asserted or assumed
 - `counterexample`: a concrete input, state or sequence that would falsify it
@@ -35,6 +36,13 @@ Per item:
 - `verdict`: `holds` (evidence supports it), `broken` (evidence contradicts it), `untested` (no evidence either way)
 - `severity`: blocker, major, minor or nit, by consequence if the claim is false
 - `check`: for `untested`, the cheapest check the orchestrator could run
+
+## Which verdicts become findings
+- `broken`: a finding, with severity and evidence.
+- `untested`: a finding, with severity by impact; evidence is what you searched for and did not find.
+- `holds`: listed for completeness, without severity.
+
+Report as a specialist report with sections Result, Evidence, Open questions.
 
 ## Rules
 - No quota. A clean review, with every item `holds`, is valid.

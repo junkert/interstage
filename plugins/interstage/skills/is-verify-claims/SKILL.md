@@ -20,9 +20,11 @@ Trust nothing you did not observe yourself. A claim is a hypothesis until you ha
 
 - **Stale evidence is no evidence.** Any result older than the latest change to the code it covers must be re-run. This includes your own earlier runs.
 - **Absence of evidence is not evidence of absence.** "No errors found" by a check that could not have found them (wrong path, filtered test selection, zero tests collected) proves nothing. Confirm the check can fail before trusting that it passed.
-- **Tests pass for the wrong reason.** Look for: assertions that are always true, mocks of the unit under test, the expected value copied from the implementation, tests skipped or focused (`only`, `skip`, `xfail`), a failure swallowed by a catch, a fixture that already contains the answer, a test that never calls the new code. Check by breaking the code on purpose in a scratch copy (or reading the assertion against the spec) and confirming the test would fail.
+- **Tests pass for the wrong reason.** Look for: assertions that are always true, mocks of the unit under test, the expected value copied from the implementation, tests skipped or focused (`only`, `skip`, `xfail`), a failure swallowed by a catch, a fixture that already contains the answer, a test that never calls the new code. Check by breaking the code on purpose in a temporary copy or git worktree outside the mission branch (never the mission checkout or the verification worktree you were given), or by reading the assertion against the spec, and confirm the test would fail.
 - **Completion is binary.** Done means every acceptance criterion is observably met. "99 percent" and "just needs wiring" mean not done.
-- Do not fix what you find. Report it; fixing is the builder's job.
+- Do not fix what you find; report it.
+- Work inside the absolute worktree path the orchestrator gives you. Run its `Setup` line (dependency install) only if approved; if dependencies cannot be installed, report the affected `done-when` conditions as unverified.
+- **Verification policy.** `lsp` diagnostics count only when the tool and a server for the changed files exist; otherwise record a `minor` finding `lsp unverified` and continue, unless Q01 or the assignment requires diagnostics (then `major`). A `done-when` condition you cannot verify is `major`. Flaky tests are findings, never retried to green.
 
 ## Checks by claim type
 
@@ -32,7 +34,7 @@ Trust nothing you did not observe yourself. A claim is a hypothesis until you ha
 | Feature built | Execute the user-visible path end to end; confirm the entry point is reachable (route registered, command exported, flag read) and every new function has a caller |
 | Matches spec | Compare each spec clause to code with `file:line`; see `skill://is-spec-gap-analysis` |
 | Bug fixed | Reproduce the original failure on the old code, then show it gone on the new code, plus a regression test |
-| System operational | Start it, hit a real endpoint or command, and read the response; a process existing is not health |
+| System operational | Start it, hit a real endpoint or command, and read the response; a process existing is not health. If the bash hook blocks `curl` or `wget`, use the language's HTTP client or the project's own CLI, or report the need as an open question |
 | Docs accurate | Follow the documented steps literally in a clean state |
 | Progress record says done | Treat as a claim about the code, not about the record; check the code |
 
@@ -65,7 +67,7 @@ Production readiness (monitoring, on-call, compliance) is outside this skill.
 
 ## Domain sanity
 
-Behavior can be technically correct and still wrong for the domain. Check units (and unit conversion), value ranges, time zones and DST, rounding and currency, data volumes, realistic constants (a timeout, rate, limit or tax figure copied from nowhere), and domain invariants (balances never negative, totals equal the sum of parts, state transitions legal). Look up domain facts in the project's docs or by web search and cite the source. An assumption you cannot confirm is not a finding: list it under open questions to the orchestrator.
+Behavior can be technically correct and still wrong for the domain. Check units and conversions, value ranges, time zones and DST, rounding and currency, data volumes, realistic constants (a timeout, rate, limit or tax figure copied from nowhere), and domain invariants (balances never negative, totals equal the sum of parts, legal state transitions). Look up domain facts in the project's docs first and cite the source; you have no web search, so list outside sources you would need under Open questions. An assumption you cannot confirm is not a finding: report it as an open question to the orchestrator.
 
 ## Output
 

@@ -161,7 +161,7 @@ describe("failure escalation", () => {
     const result = apply(failing(2, 0), "T-001", "builder_failed");
     expect(result.items[0]).toMatchObject({ state: "planning", failures: 3 });
     expect(result.items[0]?.history.map(h => h.event)).toEqual(["builder_failed", "auto_escalate"]);
-    expect(result.next).toContain("pogo");
+    expect(result.next).toContain("fido as the planner");
   });
 
   test("the third failure still escalates after one planner round", () => {
@@ -273,6 +273,32 @@ describe("integration", () => {
     result = apply(items, "T-001", "integrate_conflict");
     expect(result.items[0]).toMatchObject({ state: "blocked", conflicts: 3, failures: 0 });
     expect(result.items[0]?.history.at(-1)?.event).toBe("auto_block");
+  });
+});
+
+describe("unblock", () => {
+  const blocked = () => [item("T-001", { state: "blocked", failures: 3, conflicts: 2, plannerRounds: 2 })];
+
+  test("needs the user decision as a note, then resets the counters and returns to pending", () => {
+    expect(apply(blocked(), "T-001", "unblock").ok).toBe(false);
+    expect(apply(blocked(), "T-001", "unblock", { note: "  " }).ok).toBe(false);
+    const result = apply(blocked(), "T-001", "unblock", { note: "user chose option B" });
+    expect(result.items[0]).toMatchObject({ state: "pending", failures: 0, conflicts: 0, plannerRounds: 0 });
+    expect(result.items[0]?.history).toEqual([{ at: CLOCK, event: "unblock", from: "blocked", to: "pending", note: "user chose option B" }]);
+  });
+
+  test("only blocked items can be unblocked, and a blocked mission can then complete", () => {
+    expect(apply([item("T-001", { state: "failed" })], "T-001", "unblock", { note: "x" }).ok).toBe(false);
+    const started = apply(apply(blocked(), "T-001", "unblock", { note: "go" }).items, "T-001", "start");
+    expect(started.items[0]?.state).toBe("building");
+  });
+});
+
+describe("next hints", () => {
+  test("a conflict says to rebuild with the same task name and read the retry branch from the result", () => {
+    const result = apply([item("T-001", { state: "integrating" })], "T-001", "integrate_conflict");
+    expect(result.next).toContain("same task name T-001");
+    expect(result.next).toContain("omp/task/T-001-2");
   });
 });
 

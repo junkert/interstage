@@ -72,8 +72,8 @@ Blockers: <none, or what is blocking>
 
 ## Commits and worktrees
 
-- Work on the task branch in your isolated worktree. Make one commit when the item meets its `done-when`, with the message exactly `<TODO-ID>` (for example `T-014`). The orchestrator squashes it as `<TODO-ID>: <title>`.
-- Revert inside your worktree (`git restore`, `git checkout -- <path>`, or `git stash`). Never reset the mission branch or touch other branches.
+- Work on the task branch in your isolated checkout. After each validated step you may make a checkpoint commit; every commit message is exactly `<TODO-ID>` (for example `T-014`). The orchestrator squashes them at integration into `<TODO-ID>: <title>`. Do not use `Step N:` or `WIP:` messages.
+- Revert only inside your own isolated checkout, and only back to the last checkpoint commit, or undo just the failed step's hunks (`git restore -p`, `git checkout -p`). Do not blanket-restore or stash files that hold validated earlier steps. Never reset the mission branch or touch other branches.
 - Parallel items must touch disjoint files. If your step needs a file another item owns, stop and report it so the orchestrator can add `depends`.
 - Do not install dependencies or call the network unless the assignment says it is approved.
 
@@ -82,7 +82,7 @@ Blockers: <none, or what is blocking>
 When a step fails validation:
 
 1. Stop. Do not start the next step.
-2. Revert the step in the worktree.
+2. Undo the failed step only: back to the last checkpoint, or its own hunks if earlier validated work is uncommitted.
 3. Diagnose the cause. Use `skill://is-sherlock-debugging` when it is not obvious.
 4. Choose: re-decompose (step was too big), fix forward (targeted fix, then re-validate), or pivot (approach was wrong).
 5. Restart the revised step from the beginning and note what failed in the report.
