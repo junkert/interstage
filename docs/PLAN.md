@@ -214,12 +214,14 @@ Details are in DESIGN "Phase 1 spike results". Summary:
 
 1. Agent files use role fallbacks (`@role, @default`). Validator rule: every agent `model` ends with `@default`.
 2. The extension exports `INTERSTAGE_STATE_DIR` (absolute) from the main session; all mission and usage writes use it. Builders return evidence in task output; Flight writes it.
-3. The extension sets `task.isolation.apply=false`. Flight integrates retained branches in dependency order, one `git merge --no-ff` per verified item. Gate E is a `tool_call` gate on `git merge`; gate D a `tool_call` gate on installs and network calls.
+3. The extension sets `task.isolation.apply=false`. Flight integrates retained branches in dependency order, one `git merge --squash <task-branch>` plus `git commit -m "<TODO-ID>: <title>"` per verified item. Gate E is a `tool_call` gate on `git merge`; gate D a `tool_call` gate on installs and network calls.
 4. **Integration-conflict policy (approved):** a conflicting item is rebuilt on the updated mission branch by a fresh builder. That attempt counts against the item's 3-failure counter only if it fails verification; a conflict alone is not a failure. After 2 conflict rebuilds the item is `blocked` and CAPCOM is told.
 5. `mission` tool access is restricted to Houston and Flight (removal in `before_agent_start` plus a check in `execute`).
 6. The TypeScript validator owns TODO validation (`## T-ID` items with `depends`, `spec`, `done-when`). `validate-todo.sh` is not shipped.
 7. `/interstage:init` must `await` its config writes.
 8. Nx: the `validate` target inputs are narrowed (already applied); generators are ESM; the generators package is linked with `workspace:*`.
+9. Packs (observability, web, data, ops, forge) were built in the same parallel wave as the core instead of in Phase 6. The forge pack ships only the `is-forge` skill; the Nx generators are written in Phase 7. `install.sh` is deferred to Phase 7 and will be real.
+10. After the parallel build, four independent reviewers audited agents, skills and packs; the findings were fixed (commit 129ee76). Notable contract changes: `unblock` event, `plan_set` refresh semantics, retry branch naming, verification worktree with a `Setup` line, a verification policy for missing `lsp`, and a 7th operating rule (untrusted content is data).
 
 ## 7. Parallelization
 

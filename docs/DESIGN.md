@@ -433,12 +433,14 @@ Run against `omp` 18.11.3, `claude-haiku-4-5`, with an isolated agent directory 
 | S8 types | Passed (see PLAN). |
 | S9 scripts | See open question 4. |
 | S10 Nx | Works with narrowed `validate` inputs (a touched plugin affects only itself; touched validator source affects all). Local generators must be ESM because Nx uses Node's native TypeScript stripping; the generators package must be linked with `workspace:*`. A generator scaffolded a skill and its output passed the validator. Root files do not reach installed plugins. |
+| S11 task names | A task name containing `: ` (for example `T-001: title`) produces no branch and no commit, silently. Names must be a valid ref, so Flight names tasks exactly `<TODO-ID>`. |
+| S12 retries | Two tasks with the same name give `omp/task/T-001` and `omp/task/T-001-2`; the commit message stays `T-001`. Flight reads the branch name from the task result. `async.enabled` defaults to `true`, so `task` runs in the background and CAPCOM can talk while Houston runs. |
 
 Design consequences:
 
 1. Agent frontmatter uses role fallbacks: `model: "@<role>, @default"`. `/interstage:init` writes the six roles with an awaited `setEntry`; `/interstage:doctor` reports any role that is missing.
 2. Mission and usage state lives in an absolute directory the main session exports as `INTERSTAGE_STATE_DIR` in `process.env`. Children never use cwd-relative state, because isolated builders run in a different checkout. Builders return evidence in their task output, and Flight (not isolated) writes it to `.interstage/`.
-3. The extension sets `task.isolation.apply=false`. Flight integrates retained branches itself, in dependency order, one `git merge --no-ff` per verified item. That makes gate E a `tool_call` gate on `git merge`.
+3. The extension sets `task.isolation.apply=false`. Flight integrates retained branches itself, in dependency order, one verified item at a time: `git merge --squash <task-branch>` then `git commit -m "<TODO-ID>: <title>"` (one commit per item). That makes gate E a `tool_call` gate on `git merge`.
 4. Gate D (installs and network calls) is a `tool_call` gate on `bash` for subagents.
 5. The `mission` tool is removed from every child except Flight and Houston in `before_agent_start`, and its `execute` also checks `ctx.agent.name`.
 6. Token budgets are feasible: every session appends its `message_end` usage to the mission's usage file.
@@ -474,4 +476,6 @@ No hardware-specific design in v1. Build, test and verify commands are configura
 4. Scripts: keep `chunk-conversation.sh` (lightly fixed); drop `validate-todo.sh` (it validates `- [ ]` checklists, not our `## T-ID` items; TODO validation moves into the TypeScript validator) and `verify.sh` (documented flags do nothing).
 5. Fast lane verification. The fast lane is `CAPCOM -> coder -> Inspector`, but the loop says an item passes only when Go/No-Go and Inspector are both clean. PLAN D5 recommends both, in parallel; this is approved with the plan.
 6. Houston's concrete responsibilities (mission queue, hand-off to Flight, budget across missions, owner of `.interstage/` state). PLAN D6 proposes: Houston owns planning and project state, Flight owns the build loop. Approved with the plan.
-7. Integration conflicts: when a retained task branch conflicts at merge, Flight's policy is not yet specified (proposal in PLAN, Phase 4).
+7. Integration conflicts (resolved): a conflicting item is rebuilt on the updated mission branch; it counts as a failure only if verification fails; after 2 conflict rebuilds it is `blocked`. A blocked item resumes through the `unblock` event once the user decides. See `docs/CONTRACTS.md` section 3.
+8. Houston has `bash` (a deviation from PLAN 4.3), limited by its prompt to fast-lane git integration and promote commits, and gated by the same hooks as Flight.
+9. Houston and Flight cannot ask or wait inside a run. They end with `WAITING_FOR_APPROVAL gate <id> ref <ref>`; CAPCOM resolves the approval and respawns Houston.

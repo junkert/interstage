@@ -24,6 +24,18 @@ export interface HookDeps {
 
 const TOOL = "mission";
 
+/** CAPCOM may not change the project: these tools are blocked for the main session while Interstage is active. */
+const CAPCOM_BLOCKED_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: true, eval: true, debug: true };
+
+function capcomLimit(event: { toolName: string; input: object }): { block: true; reason: string } | undefined {
+  const handoff = "CAPCOM never changes the project itself: spawn houston with the request instead, or run plain omp without --interstage.";
+  if (CAPCOM_BLOCKED_TOOLS[event.toolName]) return { block: true, reason: `${event.toolName} is blocked for CAPCOM. ${handoff}` };
+  if (event.toolName !== "bash") return undefined;
+  const command = "command" in event.input ? event.input.command : undefined;
+  if (typeof command === "string" && command.includes("chunk-conversation.sh")) return undefined;
+  return { block: true, reason: `bash is blocked for CAPCOM except the import chunker script. ${handoff}` };
+}
+
 function callerName(ctx: HookCtx): string {
   return ctx.agent.kind === "main" ? "main" : ctx.agent.name;
 }
@@ -70,6 +82,12 @@ export function createHooks(deps: HookDeps) {
       }
     },
 
+    /** CAPCOM spawns only houston. Pure and synchronous: the spawner's context says who is asking. */
+    capcomSpawn(event: { agent: string }, ctx: HookCtx): { block: true; reason: string } | undefined {
+      if (ctx.agent.kind !== "main" || !runtime.active || event.agent === "houston") return undefined;
+      return { block: true, reason: `CAPCOM spawns only houston, and you asked for "${event.agent}". Call task again with agent set to "houston".` };
+    },
+
     async beforeSubagentSpawn(event: { agent: string }): Promise<{ block: true; reason: string } | undefined> {
       try {
         const current = await currentMission(env);
@@ -99,7 +117,8 @@ export function createHooks(deps: HookDeps) {
     },
 
     async toolCall(event: { toolName: string; input: object }, ctx: HookCtx): Promise<{ block: true; reason: string } | undefined> {
-      if (ctx.agent.kind !== "sub" || event.toolName !== "bash") return undefined;
+      if (ctx.agent.kind === "main") return runtime.active ? capcomLimit(event) : undefined;
+      if (event.toolName !== "bash") return undefined;
       const command = "command" in event.input ? event.input.command : undefined;
       if (typeof command !== "string") return undefined;
       const stateDir = env[ENV_STATE_DIR];
@@ -198,7 +217,7 @@ export function registerHooks(pi: ExtensionAPI, runtime: Runtime): void {
     setActiveTools: names => pi.setActiveTools(names),
   });
   pi.on("before_agent_start", (event, ctx) => hooks.beforeAgentStart(event, ctx));
-  pi.on("before_subagent_spawn", event => hooks.beforeSubagentSpawn(event));
+  pi.on("before_subagent_spawn", async (event, ctx) => hooks.capcomSpawn(event, ctx) ?? (await hooks.beforeSubagentSpawn(event)));
   pi.on("tool_call", (event, ctx) => hooks.toolCall(event, ctx));
   pi.on("message_end", (event, ctx) => hooks.messageEnd(event, ctx));
 }

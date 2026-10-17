@@ -397,3 +397,44 @@ describe("message_end", () => {
     }
   });
 });
+
+describe("CAPCOM limits (main session while Interstage is active)", () => {
+  const call = (toolName: string, input: object = {}) => ({ toolName, input });
+
+  test("blocks project-changing tools and every bash command except the import chunker", async () => {
+    const sb = await sandbox();
+    const runtime = createRuntime();
+    runtime.active = true;
+    const { hooks } = hooksFor(sb.env, runtime);
+    const main = ctxOf("main").ctx;
+    for (const name of ["edit", "write", "ast_edit", "eval", "debug"]) {
+      expect((await hooks.toolCall(call(name), main))?.block).toBe(true);
+    }
+    const git = await hooks.toolCall(call("bash", { command: "git commit -am x" }), main);
+    expect(git?.reason).toContain("spawn houston");
+    expect(await hooks.toolCall(call("bash", { command: "bash scripts/chunk-conversation.sh in.txt out" }), main)).toBeUndefined();
+    expect(await hooks.toolCall(call("read", { path: "a" }), main)).toBeUndefined();
+    expect(await hooks.toolCall(call("task", {}), main)).toBeUndefined();
+  });
+
+  test("does nothing without --interstage", async () => {
+    const sb = await sandbox();
+    const { hooks } = hooksFor(sb.env);
+    expect(await hooks.toolCall(call("edit"), ctxOf("main").ctx)).toBeUndefined();
+    expect(await hooks.toolCall(call("bash", { command: "git commit -am x" }), ctxOf("main").ctx)).toBeUndefined();
+  });
+});
+
+describe("CAPCOM spawn limit", () => {
+  test("the active main session may spawn only houston; other sessions and inactive runs are untouched", async () => {
+    const sb = await sandbox();
+    const runtime = createRuntime();
+    const { hooks } = hooksFor(sb.env, runtime);
+    expect(hooks.capcomSpawn({ agent: "task" }, ctxOf("main").ctx)).toBeUndefined();
+    runtime.active = true;
+    expect(hooks.capcomSpawn({ agent: "houston" }, ctxOf("main").ctx)).toBeUndefined();
+    const blocked = hooks.capcomSpawn({ agent: "task" }, ctxOf("main").ctx);
+    expect(blocked?.reason).toContain('agent set to "houston"');
+    expect(hooks.capcomSpawn({ agent: "curiosity" }, ctxOf("sub", "flight").ctx)).toBeUndefined();
+  });
+});
