@@ -17,6 +17,7 @@
     "check": "nx run-many -t validate typecheck test && bash tools/shellcheck.sh"
   },
   "devDependencies": {
+    "@interstage/generators": "workspace:*",
     "@oh-my-pi/pi-coding-agent": "18.11.3",
     "@types/bun": "1.4.3",
     "nx": "23.3.0",

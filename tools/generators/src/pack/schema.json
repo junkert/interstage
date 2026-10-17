@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "InterstagePack",
+  "title": "Interstage pack",
+  "description": "Scaffold plugins/interstage-<name>/ with a first skill and list it in the marketplace catalog.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Pack name without the interstage- prefix (kebab-case); the plugin is interstage-<name>.",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "x-prompt": "Pack name, without the interstage- prefix?"
+    },
+    "description": {
+      "type": "string",
+      "description": "Pack description for package.json and the marketplace catalog (one line, at most 300 characters).",
+      "x-prompt": "Pack description?"
+    },
+    "skill": {
+      "type": "string",
+      "description": "Name of the pack's first skill without the is- prefix; defaults to the pack name.",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "skillDescription": {
+      "type": "string",
+      "description": "Trigger statement of the first skill (at most 1024 characters, one line).",
+      "x-prompt": "Trigger statement for the first skill?"
+    },
+    "budgetBytes": {
+      "type": "integer",
+      "description": "SKILL.md size target of the first skill recorded in skills.manifest.json.",
+      "default": 3000,
+      "minimum": 1
+    }
+  },
+  "required": ["name", "description", "skillDescription"],
+  "additionalProperties": false
+}

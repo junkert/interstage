@@ -1,0 +1,35 @@
+{
+  "name": "@interstage/generators",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Nx generators that scaffold Interstage skills, agents and packs.",
+  "license": "MIT",
+  "generators": "./generators.json",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@interstage/validate": "workspace:*"
+  },
+  "nx": {
+    "targets": {
+      "typecheck": {
+        "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/tools/validate/src/**/*", "{workspaceRoot}/tsconfig.base.json"]
+      },
+      "test": {
+        "inputs": [
+          "{projectRoot}/**/*",
+          "{workspaceRoot}/tools/validate/src/**/*",
+          "{workspaceRoot}/plugins/*/package.json",
+          "{workspaceRoot}/plugins/*/skills/**/*",
+          "{workspaceRoot}/plugins/*/agents/**/*",
+          "{workspaceRoot}/.omp-plugin/**/*",
+          "{workspaceRoot}/skills.manifest.json",
+          "{workspaceRoot}/THIRD_PARTY_NOTICES.md"
+        ]
+      }
+    }
+  }
+}

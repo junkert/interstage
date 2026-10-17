@@ -21,6 +21,21 @@ bun run shellcheck
 
 CI runs the same checks on Linux and macOS. It never calls a model.
 
+## Adding a skill, agent or pack
+
+Local Nx generators (`tools/generators`) scaffold new content and register it. Each refuses to overwrite existing files, requires kebab-case names, and accepts `--dry-run` to preview.
+
+```bash
+bunx nx g @interstage/generators:skill --plugin=interstage-web --name=<name> --description="<trigger statement>" [--budgetBytes=3000]
+bunx nx g @interstage/generators:agent --name=<name> --description="<when to delegate>" --role=<orchestrator|planner|coder|reviewer|scout> --tools="read, grep, glob" [--skills="is-<name>"]
+bunx nx g @interstage/generators:pack --name=<name> --description="<pack description>" --skillDescription="<trigger statement>" [--skill=<name>]
+```
+
+- `skill` writes `plugins/<plugin>/skills/is-<name>/SKILL.md` (give `--name` without the `is-` prefix) and an `authored` entry in `skills.manifest.json`.
+- `agent` writes `plugins/interstage/agents/<name>.md`; the Operating rules block is copied from the existing agent files. Add the agent to the `spawns` list of the orchestrators that delegate to it.
+- `pack` writes `plugins/interstage-<name>/package.json` (give `--name` without the `interstage-` prefix), a first skill, and the marketplace catalog entry. Run `bun install` afterwards to link the new workspace and update `bun.lock`.
+- Generated files pass the validator but contain `Replace:` markers; the generator lists them. Rewrite every marker, then run `bun run check`.
+
 ## Rules for content
 
 - Agents and skills state facts and procedures. They contain no fabricated sample reports, scores, dates, dollar figures or human schedules, and no commands that do not exist.

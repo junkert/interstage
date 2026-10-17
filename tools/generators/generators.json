@@ -1,0 +1,21 @@
+{
+  "name": "interstage",
+  "version": "0.0.0",
+  "generators": {
+    "skill": {
+      "factory": "./src/skill/generator.ts",
+      "schema": "./src/skill/schema.json",
+      "description": "Scaffold plugins/<plugin>/skills/is-<name>/SKILL.md and register it in skills.manifest.json."
+    },
+    "agent": {
+      "factory": "./src/agent/generator.ts",
+      "schema": "./src/agent/schema.json",
+      "description": "Scaffold plugins/interstage/agents/<name>.md with the required sections and the verbatim Operating rules."
+    },
+    "pack": {
+      "factory": "./src/pack/generator.ts",
+      "schema": "./src/pack/schema.json",
+      "description": "Scaffold plugins/interstage-<name>/ with a first skill and list it in the marketplace catalog."
+    }
+  }
+}
