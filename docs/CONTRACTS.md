@@ -88,6 +88,14 @@ Breaker (gate G): when `consecutive` reaches `breaker.consecutiveFailures` the m
 
 Verification policy: `lsp` diagnostics count toward a clean verdict only when the tool is available and a language server is configured for the changed files. If the tool or server is missing, the verifier records a `minor` finding `lsp unverified` and continues, unless the SPEC Quality spec (Q01) or the assignment says diagnostics are required, in which case it is `major`. A `done-when` condition that cannot be verified is a `major` finding. Flaky tests are findings, never retried to green.
 
+Process evidence (a real run on a small model showed Flight skipping verifier spawns, writing verification reports itself and re-creating the builders' files by hand; prompts alone do not prevent that). The extension therefore records every allowed subagent spawn in `missions/<id>/spawns.jsonl` (`{ at, agent }`) and every gate E-classified `git merge` of a task branch run by a subagent in `missions/<id>/merges.jsonl` (`{ at, item }`), and `transition` enforces credits:
+
+- `builder_done` and `builder_failed` consume one executor spawn (`curiosity`, `perseverance`, `orbiter`, `tiger-team`, `golden-record`, `booster`). Credits for a rebuild come from a new spawn.
+- `verify_clean` and `verify_failed` consume one `go-no-go` spawn and one `inspector` spawn each.
+- `integrate_ok` requires a recorded `git merge ... omp/task/<ID>` (any `-N` suffix) for that item dated after its latest `builder_done`, and that `commit` names a commit that exists, whose subject starts with `<ID>: `.
+- A transition that lacks a credit is an error that names the missing spawn or merge and says to spawn the agent or run the merge.
+- Flight and Houston may run bash for read-only inspection and git only (allowlist in section 4); they cannot create or modify project files through bash.
+
 ## 4. Gates
 
 | Gate | Meaning | Where enforced |
@@ -124,6 +132,8 @@ Hook command classification (case-sensitive regexes, applied to each `bash` comm
 Git patterns above tolerate global options between `git` and the subcommand (`git -C <dir> push`, `git -c k=v push`, `git --no-pager push`) and a quoted `git`; a hook that misses these is a bypass of gates E and F.
 
 Gates D, E and F apply only to sessions whose `ctx.agent.kind === "sub"`. The main session (CAPCOM) is restricted differently while Interstage is active: `edit`, `write`, `ast_edit`, `eval` and `debug` are blocked, `bash` is blocked except for the import chunker script (an exact command, no shell metacharacters), and `task` may spawn only `houston`. The block reason is a single sentence that names the gate and tells the agent to report the need to its orchestrator as an open question.
+
+Flight and Houston bash allowlist: every simple command (split on `&&`, `||`, `;`, `|` and newlines, after removing quoted strings for the check) starts with `git`, `ls`, `cat`, `pwd`, `echo`, `head`, `tail`, `wc`, `test`, `true`, `grep`, `rg` or `cd`, and the whole command contains no output redirection (`>`, `>>`, `<<` outside quotes) and no `tee`. `git` itself is limited by gates D, E and F. Anything else is blocked with a reason that says Flight and Houston delegate file changes and test runs to builders and verifiers.
 
 ## 5. The `mission` tool
 

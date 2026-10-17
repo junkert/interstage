@@ -6,6 +6,7 @@ All notable changes to Interstage are recorded here. The format follows [Keep a 
 
 ### Changed
 
+- Process evidence: `transition` now requires recorded spawns (executor for builder results, `go-no-go` and `inspector` for verification results) and, for `integrate_ok`, a recorded task-branch merge newer than `builder_done` and a commit whose subject starts with `<ID>: `. Flight and Houston bash is limited to git and read-only inspection.
 - Token budgets count billable tokens (`input + output + cacheWrite`) and exclude cache reads, which made a budget grow with conversation length squared. Status and the budget view show cache reads separately; usage records missing the token fields are reported as malformed.
 
 ### Added

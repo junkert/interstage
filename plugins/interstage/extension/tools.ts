@@ -19,6 +19,7 @@ import {
   type SteeringPacket,
   type SteeringSignal,
 } from "./contracts";
+import { commitProblem, creditShortfall, loadMerges, loadSpawns } from "./credits";
 import { checkBudgets, sumCacheReads } from "./budget";
 import { decideGate, hasApproval } from "./gates";
 import { validateFindings } from "./severity";
@@ -465,6 +466,16 @@ async function transition(deps: MissionDeps, active: Active, input: Extract<Miss
     const result = applyEvent({ mission, items, config, approvals, budget, now }, input);
     if (!result.ok) return err(result.text, result.next);
     const updated = result.items.find(item => item.id === input.itemId);
+    // Process evidence (CONTRACTS section 3): the state machine accepted the event, now check it was earned.
+    const before = items.find(item => item.id === input.itemId);
+    if (before !== undefined) {
+      const shortfall = creditShortfall({ event: input.event, item: before, items, spawns: await loadSpawns(dir), merges: await loadMerges(dir) });
+      if (shortfall !== undefined) return err(shortfall);
+      if (input.event === "integrate_ok") {
+        const problem = await commitProblem(deps.exec, deps.cwd, before.id, (input.commit ?? "").trim());
+        if (problem !== undefined) return err(problem);
+      }
+    }
     if (updated !== undefined) await saveItem(dir, updated);
     if (result.mission !== mission) await saveMission(dir, result.mission);
     return ok(result.text, { item: updated, missionStatus: result.mission.status }, result.next);

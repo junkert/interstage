@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ACTION_CALLERS, type MissionToolInput } from "../../plugins/interstage/extension/contracts";
 import { executeMission, missionParameters, parseMissionInput, registerMissionTool, type MissionDeps } from "../../plugins/interstage/extension/tools";
 import { loadApprovals, loadItems, loadMission, saveItem } from "../../plugins/interstage/extension/state";
-import { CLOCK, BLOCKER, usageLine, clock, git, realExec, sandbox, tempDir, type Sandbox } from "./support";
+import { CLOCK, BLOCKER, BUILD, VERIFY, commitWithSubject, merged, spawned, usageLine, clock, git, realExec, sandbox, tempDir, type Sandbox } from "./support";
 
 const TODO = `# Plan
 
@@ -391,11 +391,14 @@ describe("transition through the tool", () => {
     await call(sb, "main", { action: "approval", op: "resolve", gate: "A", ref: "plan", status: "granted" });
     expect((await t("T-001", "start")).ok).toBe(true);
     expect((await t("T-002", "start")).text).toContain("T-001");
+    await spawned(dir, ...BUILD, ...VERIFY);
     expect((await t("T-001", "builder_done")).ok).toBe(true);
     expect((await t("T-001", "verify_clean", { findings: [] })).ok).toBe(true);
-    const done = await t("T-001", "integrate_ok", { commit: "deadbeef" });
+    await merged(dir, "T-001");
+    const sha = await commitWithSubject(sb.repo, "T-001: First thing");
+    const done = await t("T-001", "integrate_ok", { commit: sha });
     expect(done.ok).toBe(true);
-    expect((await loadItems(dir))[0]).toMatchObject({ state: "done", commit: "deadbeef" });
+    expect((await loadItems(dir))[0]).toMatchObject({ state: "done", commit: sha });
     expect((await loadItems(dir))[0]?.history.every(h => h.at === CLOCK)).toBe(true);
   });
 
@@ -404,6 +407,7 @@ describe("transition through the tool", () => {
     const dir = await newMission(sb);
     await plan(sb);
     await call(sb, "flight", { action: "transition", itemId: "T-001", event: "start" });
+    await spawned(dir, ...BUILD);
     const failed = await call(sb, "flight", { action: "transition", itemId: "T-001", event: "builder_failed" });
     expect(failed.text).toContain("circuit breaker");
     expect((await loadMission(dir))?.status).toBe("halted");
@@ -418,6 +422,7 @@ describe("transition through the tool", () => {
     const dir = await newMission(sb);
     await plan(sb);
     await call(sb, "flight", { action: "transition", itemId: "T-001", event: "start" });
+    await spawned(dir, ...BUILD);
     await call(sb, "flight", { action: "transition", itemId: "T-001", event: "builder_failed" });
     for (const caller of ["flight", "houston"]) {
       for (const status of ["paused", "running", "complete"] as const) {
@@ -438,6 +443,159 @@ describe("transition through the tool", () => {
     await writeFile(join(dir, "usage.jsonl"), usageLine("main", 50, { kind: "main" }));
     const result = await call(sb, "flight", { action: "transition", itemId: "T-001", event: "start" });
     expect(result).toMatchObject({ ok: false, text: expect.stringContaining("budget") });
+  });
+});
+
+describe("process evidence (credits)", () => {
+  async function building(sb: Sandbox, lane: "fast" | "standard" = "standard") {
+    const dir = await newMission(sb, lane);
+    await plan(sb);
+    const t = (itemId: string, event: Extract<MissionToolInput, { action: "transition" }>["event"], extra = {}, caller = "flight") =>
+      call(sb, caller, { action: "transition", itemId, event, ...extra });
+    await call(sb, "flight", { action: "approval", op: "request", gate: "A", ref: "plan" });
+    await call(sb, "main", { action: "approval", op: "resolve", gate: "A", ref: "plan", status: "granted" });
+    expect((await t("T-001", "start")).ok).toBe(true);
+    return { dir, t };
+  }
+
+  test("builder_done and builder_failed are refused with no executor spawn, and name what to spawn", async () => {
+    const sb = await sandbox();
+    const { dir, t } = await building(sb);
+    for (const event of ["builder_done", "builder_failed"] as const) {
+      const refused = await t("T-001", event);
+      expect(refused.ok).toBe(false);
+      expect(refused.text).toContain("curiosity");
+      expect(refused.text).toContain("spawn the executor");
+    }
+    expect((await loadItems(dir))[0]?.state).toBe("building");
+    await spawned(dir, "go-no-go", "inspector", "kessler");
+    expect((await t("T-001", "builder_done")).ok).toBe(false);
+  });
+
+  test("each executor type earns a builder result, once", async () => {
+    for (const agent of ["curiosity", "perseverance", "orbiter", "tiger-team", "golden-record", "booster"]) {
+      const sb = await sandbox();
+      const { dir, t } = await building(sb);
+      await spawned(dir, agent);
+      expect([agent, (await t("T-001", "builder_done")).ok]).toEqual([agent, true]);
+    }
+  });
+
+  test("verify_clean needs both go-no-go and inspector; a single one is refused naming the missing one", async () => {
+    const sb = await sandbox();
+    const { dir, t } = await building(sb);
+    await spawned(dir, ...BUILD);
+    await t("T-001", "builder_done");
+    await spawned(dir, "go-no-go");
+    const refused = await t("T-001", "verify_clean", { findings: [] });
+    expect(refused.ok).toBe(false);
+    expect(refused.text).toContain("inspector");
+    expect(refused.text).not.toContain("go-no-go spawn and");
+    await spawned(dir, "inspector");
+    expect((await t("T-001", "verify_clean", { findings: [] })).ok).toBe(true);
+  });
+
+  test("credits are consumed: one verification pair covers one verify result, a second needs a new pair", async () => {
+    const sb = await sandbox();
+    const { dir, t } = await building(sb);
+    await spawned(dir, ...BUILD, ...VERIFY);
+    await t("T-001", "builder_done");
+    expect((await t("T-001", "verify_failed", { findings: [BLOCKER] })).ok).toBe(true);
+    expect((await t("T-001", "retry")).ok).toBe(true);
+    await spawned(dir, ...BUILD);
+    await t("T-001", "builder_done");
+    const second = await t("T-001", "verify_clean", { findings: [] });
+    expect(second).toMatchObject({ ok: false, text: expect.stringContaining("go-no-go and one unused inspector") });
+    await spawned(dir, ...VERIFY);
+    expect((await t("T-001", "verify_clean", { findings: [] })).ok).toBe(true);
+  });
+
+  test("credits are counted over the whole mission, not per item", async () => {
+    const sb = await sandbox("autonomy: autopilot\n");
+    const { dir, t } = await building(sb);
+    await spawned(dir, ...BUILD);
+    await t("T-001", "builder_done");
+    await t("T-001", "verify_clean", { findings: [] }).then(r => expect(r.ok).toBe(false));
+    await spawned(dir, ...VERIFY);
+    await t("T-001", "verify_clean", { findings: [] });
+    await t("T-002", "start").then(r => expect(r.ok).toBe(false));
+    await spawned(dir, ...BUILD);
+    await merged(dir, "T-001");
+    await t("T-001", "integrate_ok", { commit: await commitWithSubject(sb.repo, "T-001: First thing") });
+    expect((await t("T-002", "start")).ok).toBe(true);
+    expect((await t("T-002", "builder_done")).ok).toBe(true);
+    expect((await t("T-002", "verify_clean", { findings: [] })).ok).toBe(false);
+  });
+
+  describe("integrate_ok", () => {
+    async function integrating(sb: Sandbox, lane: "fast" | "standard" = "standard") {
+      const { dir, t } = await building(sb, lane);
+      await spawned(dir, ...BUILD, ...VERIFY);
+      await t("T-001", "builder_done");
+      await t("T-001", "verify_clean", { findings: [] });
+      return { dir, t };
+    }
+
+    test("is refused without a recorded merge, naming the merge to run", async () => {
+      const sb = await sandbox();
+      const { t } = await integrating(sb);
+      const sha = await commitWithSubject(sb.repo, "T-001: First thing");
+      const refused = await t("T-001", "integrate_ok", { commit: sha });
+      expect(refused.ok).toBe(false);
+      expect(refused.text).toContain("git merge");
+      expect(refused.text).toContain("omp/task/T-001");
+    });
+
+    test("is refused when the merge was for another item or predates builder_done", async () => {
+      const sb = await sandbox();
+      const { dir, t } = await integrating(sb);
+      const sha = await commitWithSubject(sb.repo, "T-001: First thing");
+      await merged(dir, "T-002");
+      await merged(dir, "T-001", "2029-12-31T23:59:59.000Z");
+      expect((await t("T-001", "integrate_ok", { commit: sha })).ok).toBe(false);
+      await merged(dir, "T-001");
+      expect((await t("T-001", "integrate_ok", { commit: sha })).ok).toBe(true);
+    });
+
+    test("is refused for a commit that does not exist, is not an id, or has the wrong subject", async () => {
+      const sb = await sandbox();
+      const { dir, t } = await integrating(sb);
+      await merged(dir, "T-001");
+      const wrong = await commitWithSubject(sb.repo, "T-002: other work");
+      const noPrefix = await commitWithSubject(sb.repo, "T-001 First thing");
+      for (const [commit, expected] of [["deadbeefdeadbeef", "does not exist"], ["HEAD", "not a commit id"], ["--all", "not a commit id"], [wrong, "does not start with"], [noPrefix, "does not start with"]] as const) {
+        const refused = await t("T-001", "integrate_ok", { commit });
+        expect([commit, refused.ok, refused.text.includes(expected)]).toEqual([commit, false, true]);
+      }
+      expect((await loadItems(dir))[0]?.state).toBe("integrating");
+      expect((await t("T-001", "integrate_ok", { commit: await commitWithSubject(sb.repo, "T-001: First thing") })).ok).toBe(true);
+    });
+
+    test("fast-lane houston is held to the same rules", async () => {
+      const sb = await sandbox();
+      const { dir, t } = await integrating(sb, "fast");
+      const sha = await commitWithSubject(sb.repo, "T-001: First thing");
+      expect((await t("T-001", "integrate_ok", { commit: sha }, "houston")).ok).toBe(false);
+      await merged(dir, "T-001");
+      expect((await t("T-001", "integrate_ok", { commit: sha }, "houston")).ok).toBe(true);
+    });
+  });
+
+  test("start, retry, unblock, planner_* and integrate_conflict need no credits", async () => {
+    const sb = await sandbox();
+    const { dir, t } = await building(sb);
+    await spawned(dir, ...BUILD, ...VERIFY);
+    await t("T-001", "builder_done");
+    await t("T-001", "verify_clean", { findings: [] });
+    expect((await t("T-001", "integrate_conflict")).ok).toBe(true);
+    await saveItem(dir, { ...(await loadItems(dir))[0]!, state: "planning" });
+    expect((await t("T-001", "planner_revised")).ok).toBe(true);
+    await saveItem(dir, { ...(await loadItems(dir))[0]!, state: "planning" });
+    expect((await t("T-001", "planner_blocked")).ok).toBe(true);
+    expect((await t("T-001", "unblock", { note: "user decided" })).ok).toBe(true);
+    await saveItem(dir, { ...(await loadItems(dir))[0]!, state: "failed", failures: 1 });
+    expect((await t("T-001", "start")).ok).toBe(false);
+    expect((await t("T-001", "retry")).ok).toBe(true);
   });
 });
 

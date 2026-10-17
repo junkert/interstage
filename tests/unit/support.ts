@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { ApplyContext } from "../../plugins/interstage/extension/state";
 import { DEFAULT_CONFIG } from "../../plugins/interstage/extension/config";
 import type { GitExec } from "../../plugins/interstage/extension/tools";
+import { recordMerge, recordSpawn } from "../../plugins/interstage/extension/credits";
 import type { Approval, ItemRecord, MissionRecord, UsageRecord } from "../../plugins/interstage/extension/contracts";
 
 const created: string[] = [];
@@ -157,3 +158,25 @@ export function usageRecord(agent: string, billable: number, extra: Partial<Usag
 }
 
 export const usageLine = (agent: string, billable: number, extra: Partial<UsageRecord> = {}): string => `${JSON.stringify(usageRecord(agent, billable, extra))}\n`;
+
+/** A time after every history entry the test clock stamps, for merge records that must be newer than builder_done. */
+export const LATER = "2030-01-01T00:00:01.000Z";
+
+/** Record spawns (process evidence) the way the before_subagent_spawn hook does. */
+export async function spawned(missionDir: string, ...agents: string[]): Promise<void> {
+  for (const agent of agents) await recordSpawn(missionDir, agent, CLOCK);
+}
+
+/** The spawns that earn builder_done or builder_failed, and then verify_clean or verify_failed. */
+export const BUILD = ["curiosity"];
+export const VERIFY = ["go-no-go", "inspector"];
+
+export function merged(missionDir: string, item: string, at = LATER): Promise<void> {
+  return recordMerge(missionDir, item, at);
+}
+
+/** An empty commit with the given subject on the current branch; returns its sha. */
+export async function commitWithSubject(repo: string, subject: string): Promise<string> {
+  await git(repo, "commit", "-q", "--allow-empty", "-m", subject);
+  return git(repo, "rev-parse", "HEAD");
+}

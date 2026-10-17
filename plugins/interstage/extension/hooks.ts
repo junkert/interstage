@@ -5,7 +5,8 @@ import { loadPersona, type Runtime } from "./activation";
 import { checkBudgets } from "./budget";
 import { DEFAULT_CONFIG } from "./config";
 import { ENV_MISSION_ID, ENV_STATE_DIR, MISSION_TOOL_AGENTS, type Approval, type InterstageConfig, type MissionRecord, type UsageRecord } from "./contracts";
-import { blockReason, classifyCommand, decideGate, hasApproval, normalizeCommand } from "./gates";
+import { recordMerge, recordSpawn } from "./credits";
+import { blockReason, classifyCommand, decideGate, hasApproval, normalizeCommand, orchestratorBashProblem } from "./gates";
 import { appendUsage, isoNow, loadApprovals, loadEffectiveConfig, loadMission, loadUsage, missionDirOf, saveMission, withMissionLock } from "./state";
 import { join } from "node:path";
 
@@ -116,6 +117,8 @@ export function createHooks(deps: HookDeps) {
             return { block: true, reason: `Pogo loop ${mission.pogoLoop} used ${budget.pogoUsed} of ${config.budgets.pogoLoopTokens} tokens, so houston must reset the Pogo loop before spawning pogo again.` };
           }
         }
+        // The spawn is allowed: record it, because transition credits are spawns (CONTRACTS section 3).
+        await recordSpawn(current.dir, event.agent, now());
         return undefined;
       } catch (error) {
         logFailure("before_subagent_spawn", error);
@@ -130,6 +133,10 @@ export function createHooks(deps: HookDeps) {
       if (typeof command !== "string") return undefined;
       const stateDir = env[ENV_STATE_DIR];
       if (stateDir === undefined || stateDir === "") return undefined;
+      if (ctx.agent.name === "flight" || ctx.agent.name === "houston") {
+        const problem = orchestratorBashProblem(command);
+        if (problem !== undefined) return { block: true, reason: `${problem}.` };
+      }
       const classified = classifyCommand(command);
       if (classified.length === 0) return undefined;
 
@@ -138,6 +145,7 @@ export function createHooks(deps: HookDeps) {
       let autonomy = DEFAULT_CONFIG.autonomy;
       let approvals: Approval[] = [];
       let noMission = false;
+      let missionDir: string | undefined;
       try {
         config = (await loadEffectiveConfig(stateDir, env)).config;
         autonomy = config.autonomy;
@@ -145,6 +153,7 @@ export function createHooks(deps: HookDeps) {
         if (current !== undefined) {
           autonomy = current.mission.autonomy;
           approvals = await loadApprovals(current.dir);
+          missionDir = current.dir;
         } else {
           noMission = true;
         }
@@ -163,6 +172,17 @@ export function createHooks(deps: HookDeps) {
         const ref = task === undefined ? item.ref : `merge:${task}`;
         if (decision === "approve" && [ref, item.ref, whole].some(candidate => hasApproval(approvals, item.gate, candidate))) continue;
         return { block: true, reason: blockReason(item.gate, item.kind, ref) };
+      }
+      // Every gate passed: a task-branch merge that is allowed to run is recorded as the credit for integrate_ok.
+      if (missionDir !== undefined) {
+        try {
+          for (const item of classified) {
+            const task = item.gate === "E" ? /omp\/task\/(T-\d{3,})(?:-\d+)?(?![\w-])/.exec(item.ref)?.[1] : undefined;
+            if (task !== undefined) await recordMerge(missionDir, task, now());
+          }
+        } catch (error) {
+          logFailure("tool_call merge record", error);
+        }
       }
       return undefined;
     },

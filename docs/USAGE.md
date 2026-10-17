@@ -142,6 +142,10 @@ While a mission is `paused` or `halted`, the extension blocks every new subagent
 - `budgets.pogoLoopTokens` caps Pogo's tokens within the current Pogo loop. Over the cap, new `pogo` spawns are blocked until Houston resets the loop; the escalation reaches you through CAPCOM.
 - Gate G, `breaker.consecutiveFailures`: each failed build or failed verification adds one to a consecutive count, and a verified, integrated item resets it. When the count reaches the limit the mission is `halted`, even in autopilot. CAPCOM explains from the failure history and offers options: revise the plan, change scope, raise a budget in config, or abort.
 
+## Process evidence
+
+The extension records every allowed subagent spawn (`spawns.jsonl`) and every allowed merge of a task branch (`merges.jsonl`) in the mission directory, and `transition` spends them as credits. `builder_done` and `builder_failed` need an unused executor spawn, `verify_clean` and `verify_failed` need an unused `go-no-go` and an unused `inspector`, and `integrate_ok` needs a recorded merge of that item's task branch after its latest `builder_done`, plus a `commit` that exists and whose subject starts with `<ID>: `. Flight and Houston may run only git and read-only inspection in bash (`git`, `ls`, `cat`, `pwd`, `echo`, `head`, `tail`, `wc`, `test`, `true`, `grep`, `rg`, `cd`, with no output redirection, here-documents, `tee` or command substitution), so they cannot write verification reports or rebuild a builder's files themselves. A refused call names what is missing.
+
 ## Approvals
 
 When a gate needs your approval, Houston or Flight stops with a report beginning `WAITING_FOR_APPROVAL gate <id> ref <ref>`. CAPCOM shows you what is being approved, the evidence and a recommendation, asks, and records your answer as granted or denied. Only CAPCOM resolves approvals. A denied ref cannot be requested again. Pending approvals appear in `/interstage:status`, and approvals are stored in `missions/<id>/approvals.json`.

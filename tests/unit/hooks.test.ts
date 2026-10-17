@@ -1,8 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createRuntime, type Runtime } from "../../plugins/interstage/extension/activation";
 import { createHooks, type HookCtx } from "../../plugins/interstage/extension/hooks";
+import { loadMerges, loadSpawns } from "../../plugins/interstage/extension/credits";
+import { orchestratorBashProblem } from "../../plugins/interstage/extension/gates";
 import { saveApprovals, saveMission, loadMission, loadUsage } from "../../plugins/interstage/extension/state";
 import type { Approval, MissionRecord } from "../../plugins/interstage/extension/contracts";
 import { CLOCK, clock, usageRecord, fakeUi, granted, mission, sandbox, type Sandbox } from "./support";
@@ -480,5 +482,152 @@ describe("CAPCOM spawn limit", () => {
     const blocked = hooks.capcomSpawn({ agent: "task" }, ctxOf("main").ctx);
     expect(blocked?.reason).toContain('agent set to "houston"');
     expect(hooks.capcomSpawn({ agent: "curiosity" }, ctxOf("sub", "flight").ctx)).toBeUndefined();
+  });
+});
+
+describe("process evidence recording", () => {
+  const bash = (command: string) => ({ toolName: "bash", input: { command } });
+
+  test("an allowed spawn is recorded with the extension's clock; blocked spawns and missions without a mission are not", async () => {
+    const sb = await sandbox();
+    const dir = await withMission(sb);
+    const { hooks } = hooksFor(sb.env);
+    await hooks.beforeSubagentSpawn({ agent: "Go-No-Go" });
+    await hooks.beforeSubagentSpawn({ agent: "inspector" });
+    expect(await loadSpawns(dir)).toEqual([{ at: CLOCK, agent: "go-no-go" }, { at: CLOCK, agent: "inspector" }]);
+    await saveMission(dir, mission({ status: "paused" }));
+    expect(await hooks.beforeSubagentSpawn({ agent: "fido" })).toMatchObject({ block: true });
+    expect(await loadSpawns(dir)).toHaveLength(2);
+    const bare = await sandbox();
+    await hooksFor(bare.env).hooks.beforeSubagentSpawn({ agent: "fido" });
+    expect(await Bun.file(join(bare.stateDir, "spawns.jsonl")).exists()).toBe(false);
+  });
+
+  test("a pogo spawn blocked by its loop budget is not recorded", async () => {
+    const sb = await sandbox("budgets:\n  pogoLoopTokens: 1\n");
+    const dir = await withMission(sb);
+    await writeFile(join(dir, "usage.jsonl"), JSON.stringify({ at: CLOCK, agent: "pogo", pogoLoop: 0, kind: "sub", input: 5, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: 0 }) + "\n");
+    expect(await hooksFor(sb.env).hooks.beforeSubagentSpawn({ agent: "pogo" })).toMatchObject({ block: true });
+    expect(await loadSpawns(dir)).toEqual([]);
+  });
+
+  test("an allowed gate E merge by a subagent is recorded per item, with the retry suffix stripped", async () => {
+    const sb = await sandbox();
+    const dir = await withMission(sb, { autonomy: "checkpoints" });
+    const { hooks } = hooksFor(sb.env);
+    const flight = ctxOf("sub", "flight").ctx;
+    expect(await hooks.toolCall(bash("git merge --squash omp/task/T-014-2"), flight)).toBeUndefined();
+    expect(await hooks.toolCall(bash("git status && git merge --squash omp/task/T-015"), flight)).toBeUndefined();
+    expect(await hooks.toolCall(bash("git merge main"), flight)).toBeUndefined();
+    expect(await loadMerges(dir)).toEqual([{ at: CLOCK, item: "T-014" }, { at: CLOCK, item: "T-015" }]);
+  });
+
+  test("a merge blocked by gate E is not recorded, and is recorded once the approval exists", async () => {
+    const sb = await sandbox();
+    const dir = await withMission(sb, { autonomy: "supervised" });
+    const { hooks } = hooksFor(sb.env);
+    const flight = ctxOf("sub", "flight").ctx;
+    expect(await hooks.toolCall(bash("git merge --squash omp/task/T-014"), flight)).toMatchObject({ block: true });
+    expect(await loadMerges(dir)).toEqual([]);
+    await saveApprovals(dir, [granted("E", "merge:T-014")]);
+    expect(await hooks.toolCall(bash("git merge --squash omp/task/T-014"), flight)).toBeUndefined();
+    expect(await loadMerges(dir)).toEqual([{ at: CLOCK, item: "T-014" }]);
+  });
+
+  test("the main session and sessions without a mission record nothing", async () => {
+    const sb = await sandbox();
+    const dir = await withMission(sb);
+    await hooksFor(sb.env).hooks.toolCall(bash("git merge --squash omp/task/T-014"), ctxOf("main").ctx);
+    expect(await loadMerges(dir)).toEqual([]);
+  });
+});
+
+describe("flight and houston bash allowlist", () => {
+  const bash = (command: string) => ({ toolName: "bash", input: { command } });
+
+  test("allows git and read-only inspection, including quoted > ; & | inside commit messages and paths", () => {
+    for (const command of [
+      "git status --porcelain",
+      "git worktree prune && git worktree add --detach \"$INTERSTAGE_STATE_DIR/worktrees/T-001\" omp/task/T-001",
+      "git worktree remove --force \"$INTERSTAGE_STATE_DIR/worktrees/T-001\"",
+      "git merge --squash omp/task/T-001",
+      'git commit -m "T-001: title with > and ; and | and && inside quotes"',
+      "git commit -m 'T-001: single > quoted; too'",
+      "git branch -D omp/task/T-001",
+      "git reset --hard HEAD",
+      "git switch -c mission/M-001-x",
+      "git rev-parse HEAD",
+      "git diff --name-only --diff-filter=U",
+      "git diff --name-only | wc -l",
+      "cd \"$INTERSTAGE_STATE_DIR\" && ls -la && cat missions/M-001/TODO.md | head -20",
+      "pwd; echo done; test -f README.md && true",
+      "grep -n foo a.txt | tail -3",
+      "rg -n foo src",
+      "git log --oneline \\\n  -5",
+    ]) {
+      expect([command, orchestratorBashProblem(command)]).toEqual([command, undefined]);
+    }
+  });
+
+  test("blocks everything else, with a reason saying to delegate file changes and test runs", () => {
+    for (const command of ["npm test", "bun test", "sed -i s/a/b/ f", "python3 x.py", "rm -rf x", "mkdir out", "cp a b", "touch f", "mv a b", "node -e 1", "bash -c 'git status'", "sh x.sh", "tee f", "gh pr list", "git status; npm test", "git status && touch f", "git log | xargs rm", "FOO=1 git status", "(git status)"]) {
+      const problem = orchestratorBashProblem(command);
+      expect([command, problem?.includes("delegate file changes and test runs")]).toEqual([command, true]);
+    }
+  });
+
+  test("blocks redirects, here-documents and tee outside quotes, which is how the observed run re-created files", () => {
+    for (const command of [
+      "cat > src/a.ts <<'EOF'\nexport const a = 1;\nEOF",
+      "echo hi > f",
+      "echo hi >> f",
+      "git diff > patch.diff",
+      "git show HEAD:a.ts>a.ts",
+      "cat <<EOF\nx\nEOF",
+      "git log 2>&1",
+      "git log | tee out.txt",
+      "echo tee",
+    ]) {
+      expect([command, orchestratorBashProblem(command) === undefined]).toEqual([command, false]);
+    }
+  });
+
+  test("rejects command substitution (also inside double quotes), process substitution, rg --pre and unbalanced quotes", () => {
+    for (const command of ['git commit -m "$(rm -rf x)"', "echo `id`", "echo $(id)", "cat <(ls)", "rg --pre ./evil foo", "rg --pre=./evil foo", 'echo "unterminated', "echo 'unterminated"]) {
+      expect([command, orchestratorBashProblem(command) === undefined]).toEqual([command, false]);
+    }
+    expect(orchestratorBashProblem("echo '$(not run)' and \"\\$(escaped)\"")).toBeUndefined();
+  });
+
+  test("the hook applies it to flight and houston only; other subagents keep gates D, E and F only", async () => {
+    const sb = await sandbox();
+    await withMission(sb, { autonomy: "autopilot" });
+    const { hooks } = hooksFor(sb.env);
+    for (const name of ["flight", "houston"]) {
+      const result = await hooks.toolCall(bash("cat > src/a.ts <<'EOF'\nx\nEOF"), ctxOf("sub", name).ctx);
+      expect([name, result?.block]).toEqual([name, true]);
+      expect(result?.reason).toContain("delegate file changes and test runs");
+      expect(await hooks.toolCall(bash("git status --porcelain"), ctxOf("sub", name).ctx)).toBeUndefined();
+    }
+    for (const name of ["curiosity", "fido", "go-no-go"]) expect(await hooks.toolCall(bash("npm test > out.txt"), ctxOf("sub", name).ctx)).toBeUndefined();
+  });
+
+  test("gates D, E and F still apply to flight after the allowlist passes", async () => {
+    const sb = await sandbox();
+    await withMission(sb, { autonomy: "supervised" });
+    const { hooks } = hooksFor(sb.env);
+    expect(await hooks.toolCall(bash("git push origin HEAD"), ctxOf("sub", "flight").ctx)).toMatchObject({ block: true, reason: expect.stringContaining("Gate F") });
+  });
+
+  test("every bash command shown in the flight and houston prompts passes the allowlist", async () => {
+    const agents = join(import.meta.dirname, "..", "..", "plugins", "interstage", "agents");
+    const shown: string[] = [];
+    for (const file of ["flight.md", "houston.md"]) {
+      const text = await readFile(join(agents, file), "utf8");
+      for (const match of text.matchAll(/`((?:git|ls|cat|pwd|echo|head|tail|wc|test|grep|rg|cd) [^`]*)`/g)) shown.push((match[1] ?? "").replace(/<[^>`]*>/g, "x"));
+    }
+    expect(shown.length).toBeGreaterThan(15);
+    expect(shown.filter(command => command.includes("worktree add"))).not.toEqual([]);
+    expect(shown.filter(command => orchestratorBashProblem(command) !== undefined)).toEqual([]);
   });
 });
