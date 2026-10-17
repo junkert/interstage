@@ -8,7 +8,21 @@ export interface AgentContext {
   skills: Map<string, number>;
   /** Names of every agent file in the same plugin. */
   agents: Set<string>;
+  /** Every skill directory name in the repository (core and packs), for `skill://` links in the prompt. */
+  knownSkills?: Set<string>;
 }
+
+const REQUIRED_SECTIONS = ["Role", "Inputs", "Method", "Output", "Definition of done", "Operating rules"];
+
+// Opening words of each rule in the verbatim Operating rules block (docs/CONTRACTS.md section 10).
+const REQUIRED_RULES = [
+  "You never talk to the user and have no `ask` tool.",
+  "Every finding needs evidence:",
+  "Severity is `blocker`",
+  "Report only what you observed.",
+  "Stay inside your assignment.",
+  "Mission artifacts live under the absolute directory in `$INTERSTAGE_STATE_DIR`",
+];
 
 // Frontmatter keys OMP reads for task agents (kebab-case spellings; camelCase and legacy aliases included).
 const ALLOWED_KEYS: Record<string, true> = {
@@ -131,6 +145,23 @@ export function validateAgent(path: string, text: string, ctx: AgentContext): Fi
   }
 
   if (body.trim() === "") add("agent-body", "the agent prompt body is empty");
+  let cursor = -1;
+  for (const heading of REQUIRED_SECTIONS) {
+    const at = body.indexOf(`\n## ${heading}\n`, cursor + 1);
+    if (at === -1) {
+      add("agent-sections", `missing section \`## ${heading}\` (or it is out of order)`);
+      break;
+    }
+    cursor = at;
+  }
+  for (const snippet of REQUIRED_RULES) {
+    if (!body.includes(snippet)) add("agent-rules", `Operating rules must contain the verbatim rule starting \`${snippet}\``);
+  }
+  if (ctx.knownSkills) {
+    for (const match of body.matchAll(/skill:\/\/(is-[a-z0-9-]+)/g)) {
+      if (!ctx.knownSkills.has(match[1] ?? "")) add("agent-skill-link", `\`skill://${match[1]}\` does not match any skill in the repository`);
+    }
+  }
   if (isDict(data.output)) add("agent-frontmatter", "structured `output` schemas are not used by Interstage agents");
   return [...findings, ...lintMarkdown(path, text)];
 }

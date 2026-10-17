@@ -5,5 +5,336 @@
     "license": "MIT",
     "copyright": "Copyright (c) 2025 lexykwaii"
   },
-  "skills": []
+  "skills": [
+    {
+      "name": "is-data-flow-architect",
+      "path": "plugins/interstage-data/skills/is-data-flow-architect",
+      "origin": "upstream",
+      "from": [
+        "data-flow-architect"
+      ],
+      "modified": true,
+      "budgetBytes": 6500
+    },
+    {
+      "name": "is-data-validation",
+      "path": "plugins/interstage-data/skills/is-data-validation",
+      "origin": "upstream",
+      "from": [
+        "data-validation"
+      ],
+      "modified": true,
+      "budgetBytes": 2500
+    },
+    {
+      "name": "is-database-optimization",
+      "path": "plugins/interstage-data/skills/is-database-optimization",
+      "origin": "upstream",
+      "from": [
+        "database-optimization"
+      ],
+      "modified": true,
+      "budgetBytes": 2500
+    },
+    {
+      "name": "is-testing-database",
+      "path": "plugins/interstage-data/skills/is-testing-database",
+      "origin": "upstream",
+      "from": [
+        "testing-database"
+      ],
+      "modified": true,
+      "budgetBytes": 2500
+    },
+    {
+      "name": "is-forge",
+      "path": "plugins/interstage-forge/skills/is-forge",
+      "origin": "authored",
+      "modified": false,
+      "budgetBytes": 6000
+    },
+    {
+      "name": "is-log-analysis",
+      "path": "plugins/interstage-observability/skills/is-log-analysis",
+      "origin": "upstream",
+      "from": [
+        "log-analysis-parsing"
+      ],
+      "modified": true,
+      "budgetBytes": 3500
+    },
+    {
+      "name": "is-structured-logging",
+      "path": "plugins/interstage-observability/skills/is-structured-logging",
+      "origin": "upstream",
+      "from": [
+        "logging-fundamentals",
+        "logging-performance-optimization",
+        "log-management-system"
+      ],
+      "modified": true,
+      "budgetBytes": 4000
+    },
+    {
+      "name": "is-tracing-correlation",
+      "path": "plugins/interstage-observability/skills/is-tracing-correlation",
+      "origin": "upstream",
+      "from": [
+        "distributed-tracing-logs",
+        "observability-logging"
+      ],
+      "modified": true,
+      "budgetBytes": 3000
+    },
+    {
+      "name": "is-performance-profiling",
+      "path": "plugins/interstage-ops/skills/is-performance-profiling",
+      "origin": "upstream",
+      "from": [
+        "performance-profiling",
+        "testing-performance",
+        "testing-chaos"
+      ],
+      "modified": true,
+      "budgetBytes": 4000
+    },
+    {
+      "name": "is-web-review",
+      "path": "plugins/interstage-web/skills/is-web-review",
+      "origin": "upstream",
+      "from": [
+        "react-review",
+        "accessibility-audit",
+        "testing-accessibility"
+      ],
+      "modified": true,
+      "budgetBytes": 3500
+    },
+    {
+      "name": "is-adversarial-review",
+      "path": "plugins/interstage/skills/is-adversarial-review",
+      "origin": "upstream",
+      "from": [
+        "devils-advocate",
+        "assumption-buster",
+        "assumption-testing"
+      ],
+      "modified": true,
+      "budgetBytes": 4000
+    },
+    {
+      "name": "is-api-documentation",
+      "path": "plugins/interstage/skills/is-api-documentation",
+      "origin": "upstream",
+      "from": [
+        "api-documentation"
+      ],
+      "modified": true,
+      "budgetBytes": 2800
+    },
+    {
+      "name": "is-baby-steps",
+      "path": "plugins/interstage/skills/is-baby-steps",
+      "origin": "upstream",
+      "from": [
+        "baby-steps"
+      ],
+      "modified": true,
+      "budgetBytes": 6000
+    },
+    {
+      "name": "is-best-practice-guide",
+      "path": "plugins/interstage/skills/is-best-practice-guide",
+      "origin": "upstream",
+      "from": [
+        "best-practice-guide"
+      ],
+      "modified": true,
+      "budgetBytes": 3000
+    },
+    {
+      "name": "is-exhaustive-specification",
+      "path": "plugins/interstage/skills/is-exhaustive-specification",
+      "origin": "upstream",
+      "from": [
+        "exhaustive-specification"
+      ],
+      "modified": true,
+      "budgetBytes": 6500
+    },
+    {
+      "name": "is-git-release",
+      "path": "plugins/interstage/skills/is-git-release",
+      "origin": "upstream",
+      "from": [
+        "git-release",
+        "vercel-deploy"
+      ],
+      "modified": true,
+      "budgetBytes": 2600
+    },
+    {
+      "name": "is-index",
+      "path": "plugins/interstage/skills/is-index",
+      "origin": "upstream",
+      "from": [
+        "index"
+      ],
+      "modified": true,
+      "budgetBytes": 2200
+    },
+    {
+      "name": "is-migration",
+      "path": "plugins/interstage/skills/is-migration",
+      "origin": "upstream",
+      "from": [
+        "code-migration",
+        "dependency-upgrade"
+      ],
+      "modified": true,
+      "budgetBytes": 5500
+    },
+    {
+      "name": "is-security-review",
+      "path": "plugins/interstage/skills/is-security-review",
+      "origin": "upstream",
+      "from": [
+        "redteam",
+        "white-hat",
+        "security-scan",
+        "testing-security"
+      ],
+      "modified": true,
+      "budgetBytes": 4000
+    },
+    {
+      "name": "is-sherlock-debugging",
+      "path": "plugins/interstage/skills/is-sherlock-debugging",
+      "origin": "upstream",
+      "from": [
+        "sherlock-debugging",
+        "incident-response"
+      ],
+      "modified": true,
+      "budgetBytes": 5500
+    },
+    {
+      "name": "is-spec-gap-analysis",
+      "path": "plugins/interstage/skills/is-spec-gap-analysis",
+      "origin": "upstream",
+      "from": [
+        "gap-analysis",
+        "spec-gap-analysis"
+      ],
+      "modified": true,
+      "budgetBytes": 4000
+    },
+    {
+      "name": "is-stepwise-testing",
+      "path": "plugins/interstage/skills/is-stepwise-testing",
+      "origin": "upstream",
+      "from": [
+        "stepwise-testing"
+      ],
+      "modified": true,
+      "budgetBytes": 3500
+    },
+    {
+      "name": "is-test-gap-analysis",
+      "path": "plugins/interstage/skills/is-test-gap-analysis",
+      "origin": "upstream",
+      "from": [
+        "test-gap-analysis",
+        "test-coverage"
+      ],
+      "modified": true,
+      "budgetBytes": 5000
+    },
+    {
+      "name": "is-test-pipeline",
+      "path": "plugins/interstage/skills/is-test-pipeline",
+      "origin": "upstream",
+      "from": [
+        "test-orchestrator",
+        "test-dependency-mapper",
+        "testing-smoke",
+        "testing-regression"
+      ],
+      "modified": true,
+      "budgetBytes": 4000
+    },
+    {
+      "name": "is-test-strategy",
+      "path": "plugins/interstage/skills/is-test-strategy",
+      "origin": "upstream",
+      "from": [
+        "testing-level-selector",
+        "testing-level-poc",
+        "testing-level-mvp",
+        "testing-level-production",
+        "testing-ecosystem",
+        "test-planning",
+        "testing-functional-suite",
+        "testing-nonfunctional-suite"
+      ],
+      "modified": true,
+      "budgetBytes": 5000
+    },
+    {
+      "name": "is-testing-e2e",
+      "path": "plugins/interstage/skills/is-testing-e2e",
+      "origin": "upstream",
+      "from": [
+        "testing-e2e",
+        "testing-compatibility"
+      ],
+      "modified": true,
+      "budgetBytes": 2500
+    },
+    {
+      "name": "is-testing-expected-results",
+      "path": "plugins/interstage/skills/is-testing-expected-results",
+      "origin": "upstream",
+      "from": [
+        "testing-expected-results"
+      ],
+      "modified": true,
+      "budgetBytes": 4500
+    },
+    {
+      "name": "is-testing-integration",
+      "path": "plugins/interstage/skills/is-testing-integration",
+      "origin": "upstream",
+      "from": [
+        "testing-integration",
+        "testing-api",
+        "testing-unit"
+      ],
+      "modified": true,
+      "budgetBytes": 3500
+    },
+    {
+      "name": "is-threat-modeling",
+      "path": "plugins/interstage/skills/is-threat-modeling",
+      "origin": "upstream",
+      "from": [
+        "white-hat",
+        "redteam"
+      ],
+      "modified": true,
+      "budgetBytes": 2000
+    },
+    {
+      "name": "is-verify-claims",
+      "path": "plugins/interstage/skills/is-verify-claims",
+      "origin": "upstream",
+      "from": [
+        "trust-but-verify",
+        "completeness-validator",
+        "reality-validation"
+      ],
+      "modified": true,
+      "budgetBytes": 6000
+    }
+  ]
 }

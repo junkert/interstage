@@ -1,0 +1,1 @@
+{ "name": "interstage-web", "version": "0.1.0", "description": "Interstage web pack: static web review checklist skill.", "license": "MIT", "scripts": { "validate": "bun run ../../tools/validate/src/cli.ts ../.. --plugin plugins/interstage-web" } }

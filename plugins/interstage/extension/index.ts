@@ -1,10 +1,14 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { createRuntime, registerActivation } from "./activation";
+import { registerCommands } from "./commands";
+import { registerHooks } from "./hooks";
+import { registerMissionTool } from "./tools";
 
 export default function interstage(pi: ExtensionAPI): void {
   pi.setLabel("Interstage");
-  pi.registerFlag("interstage", {
-    description: "Run this session as Interstage: CAPCOM talks to you and delegates to the specialist agents",
-    type: "boolean",
-    default: false,
-  });
+  const runtime = createRuntime();
+  registerActivation(pi, runtime);
+  registerMissionTool(pi);
+  registerHooks(pi, runtime);
+  registerCommands(pi, runtime);
 }

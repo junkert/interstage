@@ -1,0 +1,9 @@
+{
+  "name": "interstage-observability",
+  "version": "0.1.0",
+  "description": "Interstage observability pack: structured logging, trace correlation and log analysis skills.",
+  "license": "MIT",
+  "scripts": {
+    "validate": "bun run ../../tools/validate/src/cli.ts ../.. --plugin plugins/interstage-observability"
+  }
+}

@@ -27,7 +27,34 @@ function manifest(skills: { name: string; budgetBytes?: number }[]): void {
   });
 }
 
-function agent(name: string, frontmatter: string, body = "You are a specialist.\n"): void {
+const AGENT_BODY = `# Agent
+
+## Role
+x
+
+## Inputs
+x
+
+## Method
+x
+
+## Output
+x
+
+## Definition of done
+x
+
+## Operating rules
+
+- You never talk to the user and have no \`ask\` tool. Return open questions.
+- Every finding needs evidence: file:line.
+- Severity is \`blocker\`, \`major\`, \`minor\` or \`nit\`.
+- Report only what you observed.
+- Stay inside your assignment.
+- Mission artifacts live under the absolute directory in \`$INTERSTAGE_STATE_DIR\`.
+`;
+
+function agent(name: string, frontmatter: string, body = AGENT_BODY): void {
   put(`${PLUGIN}/agents/${name}.md`, `---\nname: ${name}\ndescription: An agent\n${frontmatter}---\n\n${body}`);
 }
 
@@ -115,7 +142,7 @@ describe("validateRepo with plugins", () => {
 
 describe("validateAgent", () => {
   const ctx = { skills: new Map([["is-baby-steps", 5000], ["is-big", 25000]]), agents: new Set(["flight", "curiosity"]) };
-  const base = (frontmatter: string) => `---\nname: curiosity\ndescription: d\n${frontmatter}---\n\nprompt\n`;
+  const base = (frontmatter: string) => `---\nname: curiosity\ndescription: d\n${frontmatter}---\n\n${AGENT_BODY}`;
   const found = (frontmatter: string, path = "agents/curiosity.md") => validateAgent(path, base(frontmatter), ctx).map((finding) => finding.rule).sort();
 
   test("accepts a valid agent", () => {
@@ -146,6 +173,23 @@ describe("validateAgent", () => {
   test("the name must match the file and not be reserved", () => {
     expect(found("", "agents/other.md")).toEqual(["agent-name"]);
     expect(validateAgent("agents/main.md", "---\nname: main\ndescription: d\n---\n\nx\n", ctx).map((finding) => finding.rule)).toContain("agent-name");
+  });
+
+  test("requires the prompt sections in order and the verbatim operating rules", () => {
+    const noSections = `---\nname: curiosity\ndescription: d\n---\n\nJust a paragraph.\n`;
+    const rules = validateAgent("agents/curiosity.md", noSections, ctx).map((finding) => finding.rule);
+    expect(rules).toContain("agent-sections");
+    expect(rules.filter((rule) => rule === "agent-rules")).toHaveLength(6);
+    const shuffled = base("").replace("## Inputs", "## Tmp").replace("## Method", "## Inputs").replace("## Tmp", "## Method");
+    expect(validateAgent("agents/curiosity.md", shuffled, ctx).map((finding) => finding.rule)).toContain("agent-sections");
+  });
+
+  test("skill links in the prompt must resolve when the repo skill list is known", () => {
+    const withLinks = base("").replace("x\n\n## Inputs", "read skill://is-baby-steps and skill://is-ghost\n\n## Inputs");
+    const known = { ...ctx, knownSkills: new Set(["is-baby-steps"]) };
+    const findings = validateAgent("agents/curiosity.md", withLinks, known);
+    expect(findings.map((finding) => finding.rule)).toEqual(["agent-skill-link"]);
+    expect(findings[0]?.message).toContain("is-ghost");
   });
 });
 

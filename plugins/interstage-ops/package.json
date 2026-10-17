@@ -1,0 +1,1 @@
+{ "name": "interstage-ops", "version": "0.1.0", "description": "Interstage ops pack: local performance profiling method with opt-in chaos testing.", "license": "MIT", "scripts": { "validate": "bun run ../../tools/validate/src/cli.ts ../.. --plugin plugins/interstage-ops" } }

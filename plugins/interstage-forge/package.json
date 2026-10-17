@@ -1,0 +1,1 @@
+{ "name": "interstage-forge", "version": "0.1.0", "description": "Interstage forge pack: authoring guide for new Interstage skills and agents.", "license": "MIT", "scripts": { "validate": "bun run ../../tools/validate/src/cli.ts ../.. --plugin plugins/interstage-forge" } }

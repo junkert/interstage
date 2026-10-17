@@ -1,6 +1,8 @@
 {
   "name": "interstage",
-  "owner": { "name": "Levi Junkert" },
+  "owner": {
+    "name": "Levi Junkert"
+  },
   "metadata": {
     "description": "Interstage: agents and skills for building software with OMP",
     "version": "0.1.0"
@@ -12,7 +14,76 @@
       "source": "./plugins/interstage",
       "version": "0.1.0",
       "category": "development",
-      "keywords": ["agents", "orchestration", "software-delivery"],
+      "keywords": [
+        "agents",
+        "orchestration",
+        "software-delivery"
+      ],
+      "license": "MIT"
+    },
+    {
+      "name": "interstage-data",
+      "description": "Interstage data pack: database, data validation, data flow and database testing skills.",
+      "source": "./plugins/interstage-data",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": [
+        "agents",
+        "skills",
+        "data"
+      ],
+      "license": "MIT"
+    },
+    {
+      "name": "interstage-forge",
+      "description": "Interstage forge pack: authoring guide for new Interstage skills and agents.",
+      "source": "./plugins/interstage-forge",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": [
+        "agents",
+        "skills",
+        "forge"
+      ],
+      "license": "MIT"
+    },
+    {
+      "name": "interstage-observability",
+      "description": "Interstage observability pack: structured logging, trace correlation and log analysis skills.",
+      "source": "./plugins/interstage-observability",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": [
+        "agents",
+        "skills",
+        "observability"
+      ],
+      "license": "MIT"
+    },
+    {
+      "name": "interstage-ops",
+      "description": "Interstage ops pack: local performance profiling method with opt-in chaos testing.",
+      "source": "./plugins/interstage-ops",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": [
+        "agents",
+        "skills",
+        "ops"
+      ],
+      "license": "MIT"
+    },
+    {
+      "name": "interstage-web",
+      "description": "Interstage web pack: static web review checklist skill.",
+      "source": "./plugins/interstage-web",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": [
+        "agents",
+        "skills",
+        "web"
+      ],
       "license": "MIT"
     }
   ]

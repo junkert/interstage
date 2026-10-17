@@ -99,7 +99,7 @@ export function validatePlugin(root: string, pluginRel: string, ctx: PluginConte
   }
 
   const agentFiles = listMarkdown(root, `${pluginRel}/agents`);
-  const agentCtx: AgentContext = { skills, agents: new Set(agentFiles.map((file) => file.replace(/\.md$/, ""))) };
+  const agentCtx: AgentContext = { skills, knownSkills: ctx.knownSkills, agents: new Set(agentFiles.map((file) => file.replace(/\.md$/, ""))) };
   for (const file of agentFiles) {
     const rel = `${pluginRel}/agents/${file}`;
     findings.push(...validateAgent(rel, readFileSync(join(root, rel), "utf8"), agentCtx));

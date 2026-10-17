@@ -1,0 +1,1 @@
+{ "name": "interstage-data", "version": "0.1.0", "description": "Interstage data pack: database, data validation, data flow and database testing skills.", "license": "MIT", "scripts": { "validate": "bun run ../../tools/validate/src/cli.ts ../.. --plugin plugins/interstage-data" } }

@@ -103,6 +103,8 @@ export interface Approval {
 export interface UsageRecord {
   at: string;
   mission?: string;
+  /** `MissionRecord.pogoLoop` at the time of the message; the Pogo loop budget sums records with the current value. */
+  pogoLoop?: number;
   agent: string;
   kind: "main" | "sub";
   input: number;
@@ -142,7 +144,8 @@ export type MissionToolInput =
   | { action: "steer"; signal: SteeringSignal; payload: Record<string, unknown>; instructions?: SteeringPacket["instructions"] }
   | { action: "apply_steering" }
   | { action: "write_artifact"; kind: ArtifactKind; name: string; content: string; append?: boolean }
-  | { action: "set_status"; status: "paused" | "running" | "complete" | "halted"; reason: string };
+  | { action: "set_status"; status: "paused" | "running" | "complete" | "halted"; reason: string }
+  | { action: "reset_pogo_loop" };
 
 export interface MissionToolResult {
   ok: boolean;
@@ -158,12 +161,13 @@ export const ACTION_CALLERS: Record<MissionToolInput["action"], readonly string[
   create: ["houston"],
   plan_set: ["houston", "flight"],
   get: ["main", "houston", "flight"],
-  transition: ["flight"],
+  transition: ["flight", "houston"],
   approval: ["main", "houston", "flight"],
   steer: ["main", "houston", "flight"],
   apply_steering: ["flight"],
   write_artifact: ["houston", "flight"],
   set_status: ["main", "houston", "flight"],
+  reset_pogo_loop: ["houston"],
 };
 
 /** Agents that may hold the `mission` tool at all. */

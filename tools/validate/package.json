@@ -10,6 +10,7 @@
     "test": "bun test"
   },
   "nx": {
+    "implicitDependencies": ["interstage"],
     "targets": {
       "validate": {
         "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/.omp-plugin/**/*", "{workspaceRoot}/skills.manifest.json", "{workspaceRoot}/THIRD_PARTY_NOTICES.md"]

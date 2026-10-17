@@ -125,12 +125,13 @@ One extension-registered tool named `mission`. Visible to the main session (CAPC
 | `create` | `title`, `lane`, `brief` | houston | Creates `missions/<id>/`, `mission.json`, the branch `mission/<id>-<slug>`; exports `INTERSTAGE_MISSION_ID` |
 | `plan_set` | `todoPath?` (default `missions/<id>/TODO.md`) | houston, flight | Parses and validates the TODO, creates or replaces `items/*.json` (items not yet started only), requests gate B when required |
 | `get` | `scope`: `mission` \| `items` \| `item` \| `approvals` \| `budget`; `itemId?` | main, houston, flight | Read state. `budget` returns used and remaining tokens and breaker state |
-| `transition` | `itemId`, `event`, `findings?`, `commit?`, `note?` | flight | Applies an event from section 3 and returns the new state and the recommended next action |
+| `transition` | `itemId`, `event`, `findings?`, `commit?`, `note?` | flight; houston (fast lane only, where Houston plays Flight) | Applies an event from section 3 and returns the new state and the recommended next action |
 | `approval` | `op`: `request` \| `resolve`; `gate`; `ref`; `status?` (`granted` \| `denied`); `note?` | request: houston, flight; resolve: main only | Creates or resolves an approval |
 | `steer` | `signal`; `payload` | main, houston, flight | Writes a steering packet (`<seq>-<signal>.json`) |
 | `apply_steering` | none | flight | Returns pending packets in `seq` order (interrupt and pause first), moves them to `applied/` |
 | `write_artifact` | `kind`: `evidence` \| `research` \| `specs` \| `decisions` \| `todo` \| `spec`; `name`; `content`; `append?` | houston, flight | Writes a file under the mission directory. `name` is a relative path without `..`; `decisions` appends to `decisions.md` |
 | `set_status` | `status`: `paused` \| `running` \| `complete` \| `halted`; `reason` | main, houston, flight | Mission status. `halted` by the breaker can only be cleared by `main` |
+| `reset_pogo_loop` | none | houston | Increments `pogoLoop`, which starts a fresh Pogo token budget |
 
 ## 6. Steering packets
 
@@ -138,7 +139,7 @@ One extension-registered tool named `mission`. Visible to the main session (CAPC
 
 ## 7. Usage records
 
-`message_end` handler in every session (main and children) appends to `missions/<id>/usage.jsonl` (or `usage.jsonl` with no mission) one `UsageRecord`: `{ at, mission?, agent, kind, input, output, cacheRead, cacheWrite, totalTokens, cost }` from `message.usage`. Budgets sum `totalTokens` over the mission file; the Pogo loop budget sums records whose `agent` is `pogo` since the last `budget reset` marker.
+`message_end` handler in every session (main and children) appends to `missions/<id>/usage.jsonl` (or `usage.jsonl` with no mission) one `UsageRecord`: `{ at, mission?, pogoLoop?, agent, kind, input, output, cacheRead, cacheWrite, totalTokens, cost }` from `message.usage`, with `pogoLoop` copied from the active mission record. Budgets sum `totalTokens` over the mission file; the Pogo loop budget sums records whose `agent` is `pogo` and whose `pogoLoop` equals the mission's current `pogoLoop`. Houston starts a new Pogo loop with `reset_pogo_loop`.
 
 ## 8. Config (`interstage.yml`)
 
