@@ -48,6 +48,10 @@ user <-> CAPCOM (main session) -> Houston (project) -> Flight (mission) -> speci
 4. Route models through role aliases (`@capcom`, `@planner`, `@scout`, `@coder`, `@reviewer`) resolved from the user's `modelRoles`.
 5. Provide `/interstage:init`, which creates `.interstage/` and adds it to `.gitignore`. It tells the user before editing and never commits.
 6. Override `task.enableLsp` so subagents can use the `lsp` tool.
+7. When `--interstage` is absent, override `task.disabledAgents` so Interstage agents are hidden (verified).
+8. Override `github.enabled` under `--interstage` so Booster's built-in `github` tool is available.
+9. Block new spawns while a mission is paused, interrupted or halted (`before_subagent_spawn`, verified).
+10. Track token budgets and circuit-breaker counters. The data source for per-session token usage is unverified.
 
 ### Commands
 
@@ -288,13 +292,13 @@ Findings from reading `data-flow-architect`, `best-practice-guide`, `context-pac
 |---|---|
 | `context-pack` | Dropped. OMP's `read` (directories), `glob` and `grep` cover it, and subagents cannot use its TUI. A short "scout handoff report" format goes into the Sojourner and Ingenuity prompts. |
 | `best-practice-guide` | Vendored and trimmed to about 2-3 KB. Gap detection and research-with-sources only. Hubble owns it, read on demand. Output goes to `.interstage/missions/<id>/research/`. Promotion into `AGENTS.md` or `docs/` only through `/interstage:promote`. The "create new skills" and fictional npm parts are removed. |
-| `completeness-validator` | Vendored and trimmed to about 4-5 KB. Tiers 1-2 only (static, runtime). Tier 3 (production readiness), the multilingual-prompting trick and the `@completeness-validator` command are dropped. Fabricated timestamps and score examples are reworded as evidence-based findings. Inspector autoloads it. `anti-patterns.md` and `detection-guide.md` are read on demand. |
+| `completeness-validator` | Folded into `verify-claims` (Tiers 1-2 only; Tier 3 production readiness, the multilingual-prompting trick and the `@completeness-validator` command are dropped). Fabricated timestamps and score examples are reworded as evidence-based findings. `anti-patterns.md` and `detection-guide.md` become on-demand references, trimmed. |
 | `data-flow-architect` | Vendored and trimmed to about 6-7 KB (generic pattern catalogs and duplicated sections removed). Output goes to `.interstage/missions/<id>/specs/`. Human interview steps become "report open questions to Flight". FIDO reads it on demand. |
 | `references/README.md` files | Dropped everywhere (placeholders or duplicates of SKILL.md), except `test-gap-analysis`'s real reference, which is folded into the consolidated skill. |
 
 ### Testing family
 
-The 27 upstream testing skills (143 KB) consolidate into 11 (about 37 KB). Names carry the `is-` prefix.
+The 27 upstream testing skills (143 KB) consolidate into 8 dedicated testing skills (about 30 KB), and three more are absorbed elsewhere. Names carry the `is-` prefix.
 
 | Interstage skill | Absorbs |
 |---|---|
@@ -306,9 +310,8 @@ The 27 upstream testing skills (143 KB) consolidate into 11 (about 37 KB). Names
 | `test-gap-analysis` | `test-gap-analysis` (with its reference), `test-coverage` |
 | `stepwise-testing` | `stepwise-testing` |
 | `testing-database` (data pack) | `testing-database` |
-| `testing-accessibility` (web pack) | `testing-accessibility` |
-| `testing-performance` (ops pack) | `testing-performance`, `testing-chaos` (chaos is opt-in) |
-| `testing-security` (Kessler) | `testing-security`, static items only; DAST and pentest dropped |
+
+`testing-accessibility`, `testing-performance` and `testing-security` are absorbed by `web-review`, `performance-profiling` (chaos stays opt-in) and `security-review` (static items only; DAST and pentest dropped). See "Remaining skill decisions".
 
 Dropped outright: `testing-unit` (no unique content), `testing-usability` (needs human participants), `testing-functional-suite` and `testing-nonfunctional-suite` (pure aggregators).
 
@@ -444,3 +447,6 @@ No hardware-specific design in v1. Build, test and verify commands are configura
 3. Killing a running subagent through its job (`write proc://<id>/kill`) is unverified. v1 applies steering at item boundaries only.
 4. Skills are reviewed at SKILL.md level in full except `redteam`, `white-hat` and `security-scan`, which were reviewed for structure and guardrails only, and `notebooklm-federated-specs` and `opencode-config`, which are out of v1. The OWASP/CWE static checklist for Kessler has no upstream source and is authored fresh (pin the OWASP year).
 5. The upstream scripts are not vendored by default. The only candidates are `chunk-conversation.sh`, `validate-todo.sh` and `testing-expected-results/scripts/verify.sh`, each subject to the shellcheck and macOS/Linux portability pass. Their contents have not been read.
+6. Fast lane verification. The fast lane is `CAPCOM -> coder -> Inspector`, but the loop says an item passes only when Go/No-Go and Inspector are both clean. Decide which verifiers run in the fast lane.
+7. Houston's concrete responsibilities (mission queue, hand-off to Flight, budget across missions, owner of `.interstage/` state) are not specified yet.
+8. Custom role aliases (`@capcom`, `@planner`, `@scout`, `@coder`, `@reviewer`) were only verified with the built-in `@smol`. Behavior when a custom role is not defined in the user's `modelRoles` is unverified.
