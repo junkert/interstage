@@ -8,5 +8,12 @@
     "validate": "bun run src/cli.ts ../..",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test"
+  },
+  "nx": {
+    "targets": {
+      "validate": {
+        "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/.omp-plugin/**/*", "{workspaceRoot}/skills.manifest.json", "{workspaceRoot}/THIRD_PARTY_NOTICES.md"]
+      }
+    }
   }
 }

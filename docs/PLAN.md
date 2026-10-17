@@ -193,20 +193,33 @@ Skill batches (Phase 5):
 | B4 Adversarial and security | `adversarial-review`, `security-review`, `threat-modeling` | OWASP checklist authored fresh |
 | B5 Delivery | `migration`, `git-release`, `api-documentation`, `index`, `sherlock-debugging`, `best-practice-guide` | |
 
-## 6. Spikes still to run (Phase 1)
+## 6. Spikes (Phase 1, complete)
 
-| # | Question | Pass criterion |
+Details are in DESIGN "Phase 1 spike results". Summary:
+
+| # | Question | Outcome |
 |---|---|---|
-| S1 | What happens when an agent uses `model: "@capcom"` and the user has no such role in `modelRoles`? Can `init` write roles to `~/.omp/agent/config.yml` without clobbering user keys? | Defined fallback or clear error; role write is merge-safe |
-| S2 | Can the extension read per-session token usage, including subagents, for budgets? | A number per child session, or a decision to budget by item count instead |
-| S3 | Does a `tool_call` hook see and block a dependency install or network call (gate D) and a merge (gate E) in a subagent? | Block reaches the agent with a reason |
-| S4 | Many-item parallel isolated merges: 6 items, overlapping files, leftover `omp/task/*` branches | Flight can detect and reconcile; no silent loss |
-| S5 | Behavior with the user's own `modelRoles`, `task.*` and `task.disabledAgents` already set | Overrides do not erase user values after the session ends (runtime layer only) |
-| S6 | Does an extension-registered tool (`mission`) reach Flight, and can subagents be kept from calling it? | Flight sees it; restricted children do not |
-| S7 | Add a GitHub-hosted marketplace with several plugins, install core and a pack, upgrade, uninstall. Include a skills-only pack to find out whether its `package.json` needs an `omp` key to be discovered | All work; plugin `.mcp.json` loads; versions compare; the minimal manifest for a skills-only pack is known |
-| S8 | Types: `@oh-my-pi/pi-coding-agent@18.11.3` as a dev dependency typechecks the extension under `tsc` | **Passed** (bun 1.4.3, TypeScript strict, `registerFlag`, `before_agent_start`, `before_subagent_spawn`, `lookup().override` all typecheck) |
-| S9 | Read the three candidate scripts (`chunk-conversation.sh`, `validate-todo.sh`, `verify.sh`); run shellcheck and a macOS/Linux check | **Partly done** (shellcheck 0.11.0, warning level, scripts not executed). `chunk-conversation.sh` (72 lines) and `validate-todo.sh` (103 lines) pass clean with no GNU-only constructs flagged: keep both. `verify.sh` (467 lines) has SC2034 warnings for `SANDBOX`, `CHROOT_DIR`, `MAX_CPU`, `MASK_SECRETS` and `POLL_INTERVAL`: options are parsed but never used, so documented flags do nothing. Its `stat` call already has a GNU/BSD fallback. Recommendation: drop `verify.sh` and ship `testing-expected-results` as methodology only. Functional review of the two kept scripts is still to do |
-| S10 | Nx on a Bun workspace: `nx init` over the skeleton, inferred targets from `package.json` scripts, `nx affected`, a local generator that scaffolds a skill, and confirmation that installing a plugin from `./plugins/<name>` ignores root Nx files | Targets run and cache; `affected` selects only the touched plugin; generator output passes the validator; installed plugin contains no root files |
+| S1 | Undefined custom role alias; writing roles to `config.yml` | Undefined role fails the spawn. Use `model: "@<role>, @default"`. `await lookup("modelRoles").setEntry(...)` persists one key and keeps the rest |
+| S2 | Per-session token usage for budgets | Yes: `message_end` usage per session; same process, shared `process.env`; isolated children run in another checkout, so state paths must be absolute |
+| S3 | `tool_call` gates | Works: a subagent's `npm install` was blocked with a reason |
+| S4 | Many-item parallel isolated merges | Works with `task.isolation.apply=false`: Flight integrates retained branches; conflicts are detected by `git merge` exit code and aborted cleanly |
+| S5 | User settings preserved | Works: merge with the user's `task.disabledAgents`; config file unchanged |
+| S6 | Extension tool visibility | Tools reach every child; remove per child in `before_agent_start`; `execute` can check `ctx.agent` |
+| S7 | Marketplace with several plugins and a skills-only pack | Works (local source). A skills-only pack needs no `omp` key. GitHub-hosted source untested |
+| S8 | Types under `tsc` | Passed |
+| S9 | Candidate scripts | Keep `chunk-conversation.sh` (light fixes); drop `validate-todo.sh` (wrong TODO format) and `verify.sh` (inert flags) |
+| S10 | Nx on Bun workspace | Works with narrowed validate inputs; generators are ESM; link with `workspace:*` |
+
+### Plan changes from Phase 1
+
+1. Agent files use role fallbacks (`@role, @default`). Validator rule: every agent `model` ends with `@default`.
+2. The extension exports `INTERSTAGE_STATE_DIR` (absolute) from the main session; all mission and usage writes use it. Builders return evidence in task output; Flight writes it.
+3. The extension sets `task.isolation.apply=false`. Flight integrates retained branches in dependency order, one `git merge --no-ff` per verified item. Gate E is a `tool_call` gate on `git merge`; gate D a `tool_call` gate on installs and network calls.
+4. **Proposed integration-conflict policy (Phase 4):** a conflicting item is rebuilt on the updated mission branch by a fresh builder. That attempt counts against the item's 3-failure counter only if it fails verification; a conflict alone is not a failure. After 2 conflict rebuilds the item is `blocked` and CAPCOM is told.
+5. `mission` tool access is restricted to Houston and Flight (removal in `before_agent_start` plus a check in `execute`).
+6. The TypeScript validator owns TODO validation (`## T-ID` items with `depends`, `spec`, `done-when`). `validate-todo.sh` is not shipped.
+7. `/interstage:init` must `await` its config writes.
+8. Nx: the `validate` target inputs are narrowed (already applied); generators are ESM; the generators package is linked with `workspace:*`.
 
 ## 7. Parallelization
 

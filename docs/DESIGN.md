@@ -417,12 +417,38 @@ Run with `omp` 18.11.3, headless (`-p`), `claude-haiku-4-5`, a throwaway extensi
 - Interactive TUI (real pty session): `/interstage:launch` typed mid-session applied the overrides and the persona (`[CAPCOM]` on the next prompt). The main session had the `ask` tool and rendered its dialog. A subagent spawned afterwards inherited depth 4, had no `ask`, and had `lsp` (because of the `task.enableLsp` override). Module state set in the main session is not visible in subagent extension instances (`launched` was false in the child).
 - Plugin-shipped MCP: a marketplace plugin with `.mcp.json` at the plugin root loaded Context7 (`{"mcpServers":{"context7":{"type":"http","url":"https://mcp.context7.com/mcp"}}}`). The model resolved `react` to `/reactjs/react.dev`. A root `mcp.json` was ignored; the file must be named `.mcp.json`. The server loaded without `--interstage`, so it is global once the plugin is installed.
 
+### Phase 1 spike results
+
+Run against `omp` 18.11.3, `claude-haiku-4-5`, with an isolated agent directory (`PI_CODING_AGENT_DIR`) and a throwaway extension. The user's real config was not touched.
+
+| # | Result |
+|---|---|
+| S1 custom roles | A role alias that is not defined (`model: "@capcom"`) makes the spawn fail with `No model selected` (the text suggests `/login`, which is misleading). A comma list falls back: `model: "@capcom, @default"` ran on `modelRoles.default`. A role defined in a `--config` overlay resolves. `await lookup("modelRoles").setEntry(pi.pi.settings, role, model)` writes only that entry to `config.yml` and keeps every other key; without `await` nothing was persisted under `-p`. |
+| S2 token usage | Each session's extension instance receives `message_end` with `message.usage` (`input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, `cost`). Children are in the same process (same pid) and see `process.env` set by the main session. An isolated child's `ctx.cwd` is a separate worktree (`~/.omp/wt/<id>/m`), so shared state needs an absolute path. |
+| S3 gate hooks | A `tool_call` handler (`{ toolName, input }`, returns `{ block, reason }`) blocked `npm install` in a subagent; the reason reached the agent verbatim and nothing was installed. |
+| S4 parallel merges | Six isolated tasks with `task.isolation.apply=false` and `merge=branch` produced six `omp/task/<name>` branches with one commit each (commit message = task name) and left the mission branch untouched. Merging them with `git merge --no-ff`: three merged clean, three conflicted on the same appended file; `git merge --abort` left a clean tree; worktrees were cleaned up. Gate E is therefore enforceable: Flight does the merge through `bash`, which the `tool_call` hook can gate. |
+| S5 user settings | Merging with the user's value before overriding (`union(current, ours)`) kept the user's disabled agent and hid the Interstage one. `config.yml` was byte-identical afterwards (runtime layer only). Rejected spawns report the agent as disabled and list what is available. |
+| S6 extension tools | An extension-registered tool is added to every subagent even when the agent declares `tools: read`. Calling `setActiveTools` without it in `before_agent_start` removes it per child, and the tool's `execute` context carries `agent` (name, kind), so it can also check the caller. A Flight-like agent kept the tool and executed it. |
+| S7 marketplace | A local marketplace with two plugins: add, discover, install both, upgrade (0.1.0 to 0.1.1) and uninstall all worked. A skills-only pack whose `package.json` has no `omp` key is discovered. `.mcp.json` in the core plugin loaded Context7. Only the plugin directory is copied into the cache. |
+| S8 types | Passed (see PLAN). |
+| S9 scripts | See open question 4. |
+| S10 Nx | Works with narrowed `validate` inputs (a touched plugin affects only itself; touched validator source affects all). Local generators must be ESM because Nx uses Node's native TypeScript stripping; the generators package must be linked with `workspace:*`. A generator scaffolded a skill and its output passed the validator. Root files do not reach installed plugins. |
+
+Design consequences:
+
+1. Agent frontmatter uses role fallbacks: `model: "@<role>, @default"`. `/interstage:init` writes the six roles with an awaited `setEntry`; `/interstage:doctor` reports any role that is missing.
+2. Mission and usage state lives in an absolute directory the main session exports as `INTERSTAGE_STATE_DIR` in `process.env`. Children never use cwd-relative state, because isolated builders run in a different checkout. Builders return evidence in their task output, and Flight (not isolated) writes it to `.interstage/`.
+3. The extension sets `task.isolation.apply=false`. Flight integrates retained branches itself, in dependency order, one `git merge --no-ff` per verified item. That makes gate E a `tool_call` gate on `git merge`.
+4. Gate D (installs and network calls) is a `tool_call` gate on `bash` for subagents.
+5. The `mission` tool is removed from every child except Flight and Houston in `before_agent_start`, and its `execute` also checks `ctx.agent.name`.
+6. Token budgets are feasible: every session appends its `message_end` usage to the mission's usage file.
+7. Hiding Interstage agents merges with the user's `task.disabledAgents` instead of replacing it.
+
 ### Not verified
 
-- Many-item parallel merges and larger conflict cases. Flight must read each task result and handle leftover `omp/task/*` branches.
-- `tool_call` hooks for gates D and E (dependency installs, merges). Only `before_subagent_spawn` was exercised.
+- A GitHub-hosted marketplace source. The marketplace flow was tested with a local directory only.
 - LSP diagnostics against a real server. None was installed for the test language, so the tool answered `No language server found`, which also shows `/interstage:doctor` is needed.
-- Behavior on other `omp` versions, and when the user already has `modelRoles` or `task.*` settings configured.
+- Behavior on other `omp` versions.
 
 ## Framework testing (confirmed)
 
@@ -443,10 +469,9 @@ No hardware-specific design in v1. Build, test and verify commands are configura
 ## Open questions
 
 1. Docker MCP (the Docker MCP Gateway) is deferred. Booster uses `bash docker ...`. Revisit if a container-management tool is wanted. Docker Desktop was not running on the dev machine when checked.
-2. Everything under "Not verified" in the spike results.
-3. Killing a running subagent through its job (`write proc://<id>/kill`) is unverified. v1 applies steering at item boundaries only.
-4. Skills are reviewed at SKILL.md level in full except `redteam`, `white-hat` and `security-scan`, which were reviewed for structure and guardrails only, and `notebooklm-federated-specs` and `opencode-config`, which are out of v1. The OWASP/CWE static checklist for Kessler has no upstream source and is authored fresh (pin the OWASP year).
-5. The upstream scripts are not vendored by default. The only candidates are `chunk-conversation.sh`, `validate-todo.sh` and `testing-expected-results/scripts/verify.sh`, each subject to the shellcheck and macOS/Linux portability pass. Their contents have not been read.
-6. Fast lane verification. The fast lane is `CAPCOM -> coder -> Inspector`, but the loop says an item passes only when Go/No-Go and Inspector are both clean. Decide which verifiers run in the fast lane.
-7. Houston's concrete responsibilities (mission queue, hand-off to Flight, budget across missions, owner of `.interstage/` state) are not specified yet.
-8. Custom role aliases (`@capcom`, `@planner`, `@scout`, `@coder`, `@reviewer`) were only verified with the built-in `@smol`. Behavior when a custom role is not defined in the user's `modelRoles` is unverified.
+2. Killing a running subagent through its job (`write proc://<id>/kill`) is unverified. v1 applies steering at item boundaries only.
+3. Skills are reviewed at SKILL.md level in full except `redteam`, `white-hat` and `security-scan`, which were reviewed for structure and guardrails only, and `notebooklm-federated-specs` and `opencode-config`, which are out of v1. The OWASP/CWE static checklist for Kessler has no upstream source and is authored fresh (pin the OWASP year).
+4. Scripts: keep `chunk-conversation.sh` (lightly fixed); drop `validate-todo.sh` (it validates `- [ ]` checklists, not our `## T-ID` items; TODO validation moves into the TypeScript validator) and `verify.sh` (documented flags do nothing).
+5. Fast lane verification. The fast lane is `CAPCOM -> coder -> Inspector`, but the loop says an item passes only when Go/No-Go and Inspector are both clean. PLAN D5 recommends both, in parallel; this is approved with the plan.
+6. Houston's concrete responsibilities (mission queue, hand-off to Flight, budget across missions, owner of `.interstage/` state). PLAN D6 proposes: Houston owns planning and project state, Flight owns the build loop. Approved with the plan.
+7. Integration conflicts: when a retained task branch conflicts at merge, Flight's policy is not yet specified (proposal in PLAN, Phase 4).

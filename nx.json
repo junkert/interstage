@@ -8,7 +8,7 @@
   "targetDefaults": {
     "validate": {
       "cache": true,
-      "inputs": ["{workspaceRoot}/plugins/**/*", "{workspaceRoot}/.omp-plugin/**/*", "{workspaceRoot}/skills.manifest.json", "{workspaceRoot}/THIRD_PARTY_NOTICES.md", "{projectRoot}/**/*"]
+      "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/tools/validate/src/**/*", "{workspaceRoot}/skills.manifest.json"]
     },
     "typecheck": {
       "cache": true,
