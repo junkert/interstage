@@ -19,13 +19,13 @@ Review these first. Each has a recommendation; if you agree with all, say so and
 
 | # | Decision | Recommendation | Why |
 |---|---|---|---|
-| D1 | Repo layout | Monorepo: `plugins/<name>/` per plugin under one `.omp-plugin/marketplace.json` | One clone serves the marketplace; packs stay independent installs |
+| D1 | Repo layout and tooling | Monorepo: `plugins/<name>/` per plugin under one `.omp-plugin/marketplace.json`, managed with **Nx on top of Bun workspaces** (light use: inferred `package.json` scripts, caching, `nx affected`, local generators; no Nx Cloud, no Nx language plugins at first) | One clone serves the marketplace; packs stay independent installs. Nx adds `affected` runs, cached validation and, most usefully, generators that scaffold a skill, agent or pack so adding one stays a one-command job. Validator and extension logic stay plain Bun/TypeScript so the repo also works without Nx. Needs spike S10 |
 | D2 | Dev toolchain | TypeScript, `bun test`, `tsc --noEmit`, `shellcheck`; types from `@oh-my-pi/pi-coding-agent@18.11.3` (the installed omp version) | omp embeds Bun, so plugin TypeScript runs under Bun. Installed on the dev machine: bun 1.4.3 (`~/.bun/bin/bun`, add `~/.bun/bin` to PATH) and shellcheck 0.11.0. CI installs both |
 | D3 | Mission state | The extension registers a `mission` tool (get, transition, steer) that Flight calls; item states live in `mission.json`/`items/*.json` and transitions are validated | An LLM hand-editing state files will drift from the 12-transition machine; a tool enforces it. Needs spike S6 |
 | D4 | Model roles | Six roles: `@capcom`, `@orchestrator`, `@planner`, `@coder`, `@reviewer`, `@scout`. `/interstage:init` asks for three models (strong, balanced, fast) and writes all six | Three questions at first run instead of six. Needs spike S1 |
 | D5 | Fast-lane verification | Go/No-Go and Inspector run in parallel on the single diff, same pass rule as every other lane | One pass rule everywhere. Alternative: Go/No-Go only (cheaper, weaker) |
 | D6 | Houston's job | Houston owns the planning phase and project state: lane confirmation, mission creation, FIDO and Pogo spec loops, Hubble research, handing a TODO to Flight. Flight owns the build loop. | Splits planning from execution; matches depth CAPCOM 0, Houston 1, Flight 2, specialists 3 |
-| D7 | CI | GitHub Actions on ubuntu and macos: validator, typecheck, unit tests, shellcheck. No LLM calls in CI. End-to-end runs are local, gated by `INTERSTAGE_E2E=1` | CI stays free and deterministic |
+| D7 | CI | GitHub Actions on ubuntu and macos: `nx affected -t validate typecheck test shellcheck` (full git history for the base SHA). No LLM calls in CI. End-to-end runs are local, gated by `INTERSTAGE_E2E=1` | CI stays free and deterministic and only re-checks plugins a change touches |
 | D8 | Versioning | Semver tags. Marketplace entries use relative `./plugins/<name>` sources and a `version` per plugin | Matches OMP's catalog format; `omp plugin upgrade` compares versions |
 | D9 | Skill source | Copy a snapshot from `/Users/levi/projects/skills` at a recorded upstream SHA into `vendor/`-free plugin dirs, with `skills.manifest.json` for provenance. No sync tooling in v1 | Interstage owns the adapted skills after vendoring |
 | D10 | `.gitignore` | Replace the Go template with a TypeScript/Bun/macOS one (see Phase 0) | The current file is the stock GitHub Go template |
@@ -50,12 +50,15 @@ plugins/
 tools/
   validate/                          validator (frontmatter, links, lint rules)
   vendor/                            one-off vendoring helper + manifest check
+  generators/                        local Nx generators: skill, agent, pack (scaffold + manifest entry)
 tests/
   unit/                              bun tests for pure extension modules
   fixtures/                          tiny repos for smoke runs
   smoke/                             headless omp scripts (gated)
 .github/workflows/ci.yml
 install.sh                           optional thin wrapper
+nx.json                              task defaults, caching (no Nx Cloud)
+package.json                         private root, Bun workspaces
 skills.manifest.json                 upstream path, SHA, Interstage name, modified?
 THIRD_PARTY_NOTICES.md
 docs/  DESIGN.md  PLAN.md  USAGE.md  AUTHORING.md
@@ -170,8 +173,8 @@ Order matters only where a phase lists a dependency.
 
 | Phase | Deliverables | Acceptance | Depends on |
 |---|---|---|---|
-| **0 Foundation** | New `.gitignore` (node_modules, dist, `*.log`, `.DS_Store`, `.env*`, coverage output, `.interstage/`), `package.json` (dev), `tsconfig.json`, CI workflow, `CONTRIBUTING.md`, `THIRD_PARTY_NOTICES.md` scaffold, `skills.manifest.json` with the upstream SHA recorded | CI green on an empty skeleton on macOS and Linux | none |
-| **1 Spikes** | S1 to S9 (below), results added to DESIGN | Each spike has a recorded pass or fail; failures change the plan before Phase 3 | 0 |
+| **0 Foundation** | New `.gitignore` (node_modules, dist, `*.log`, `.DS_Store`, `.env*`, coverage output, `.interstage/`), root `package.json` (Bun workspaces: `plugins/*`, `tools/*`), `nx.json` (pinned Nx, caching for `validate`, `typecheck`, `test`, `shellcheck`, no Nx Cloud), `tsconfig.json`, CI workflow using `nx affected`, `CONTRIBUTING.md`, `THIRD_PARTY_NOTICES.md` scaffold, `skills.manifest.json` with the upstream SHA recorded | CI green on an empty skeleton on macOS and Linux; `nx run-many -t validate` works | none |
+| **1 Spikes** | S1 to S10 (below), results added to DESIGN | Each spike has a recorded pass or fail; failures change the plan before Phase 3 | 0 |
 | **2 Skeleton** | `marketplace.json`, core and pack manifests, empty extension that registers the flag, validator v1, `install.sh` stub | Local `omp plugin marketplace add` and `install --dry-run` succeed; validator passes on the skeleton | 0, 1 (S7) |
 | **3 Extension** | Pure modules with unit tests, then adapters, then commands | Unit tests cover gates, budget, breaker, severity, lanes, state transitions, config merge, `init` idempotency; headless run shows persona, overrides, hidden agents without the flag | 1, 2 |
 | **4 Agents** | Persona, Houston, Flight (with loop spec, steering reference), then the 13 specialist files | Validator passes; headless fast-lane smoke on a fixture produces a commit `T-001: ...` on a mission branch | 2, 3 |
@@ -200,9 +203,10 @@ Skill batches (Phase 5):
 | S4 | Many-item parallel isolated merges: 6 items, overlapping files, leftover `omp/task/*` branches | Flight can detect and reconcile; no silent loss |
 | S5 | Behavior with the user's own `modelRoles`, `task.*` and `task.disabledAgents` already set | Overrides do not erase user values after the session ends (runtime layer only) |
 | S6 | Does an extension-registered tool (`mission`) reach Flight, and can subagents be kept from calling it? | Flight sees it; restricted children do not |
-| S7 | Add a GitHub-hosted marketplace with several plugins, install core and a pack, upgrade, uninstall | All work; plugin `.mcp.json` loads; versions compare |
+| S7 | Add a GitHub-hosted marketplace with several plugins, install core and a pack, upgrade, uninstall. Include a skills-only pack to find out whether its `package.json` needs an `omp` key to be discovered | All work; plugin `.mcp.json` loads; versions compare; the minimal manifest for a skills-only pack is known |
 | S8 | Types: `@oh-my-pi/pi-coding-agent@18.11.3` as a dev dependency typechecks the extension under `tsc` | **Passed** (bun 1.4.3, TypeScript strict, `registerFlag`, `before_agent_start`, `before_subagent_spawn`, `lookup().override` all typecheck) |
 | S9 | Read the three candidate scripts (`chunk-conversation.sh`, `validate-todo.sh`, `verify.sh`); run shellcheck and a macOS/Linux check | **Partly done** (shellcheck 0.11.0, warning level, scripts not executed). `chunk-conversation.sh` (72 lines) and `validate-todo.sh` (103 lines) pass clean with no GNU-only constructs flagged: keep both. `verify.sh` (467 lines) has SC2034 warnings for `SANDBOX`, `CHROOT_DIR`, `MAX_CPU`, `MASK_SECRETS` and `POLL_INTERVAL`: options are parsed but never used, so documented flags do nothing. Its `stat` call already has a GNU/BSD fallback. Recommendation: drop `verify.sh` and ship `testing-expected-results` as methodology only. Functional review of the two kept scripts is still to do |
+| S10 | Nx on a Bun workspace: `nx init` over the skeleton, inferred targets from `package.json` scripts, `nx affected`, a local generator that scaffolds a skill, and confirmation that installing a plugin from `./plugins/<name>` ignores root Nx files | Targets run and cache; `affected` selects only the touched plugin; generator output passes the validator; installed plugin contains no root files |
 
 ## 7. Parallelization
 
