@@ -38,7 +38,7 @@ user <-> CAPCOM (main session) -> Houston (project) -> Flight (mission) -> speci
 - The extension sets runtime overrides: depth of at least 3, `task.isolation.enabled`, and branch merge mode.
 - The extension swaps in the CAPCOM persona for the main session only, via `before_agent_start`.
 - A shell alias or function is documented as optional. There is no wrapper binary and no PATH install.
-- Plain `omp` stays stock.
+- Plain `omp` keeps its behavior apart from the core plugin's visible skills. Agents, commands and persona only appear with `--interstage`.
 
 ### Extension duties (assumed; the answer was left blank)
 
@@ -80,7 +80,7 @@ Extension-registered: `/interstage:init`, `:launch`, `:status`, `:abort`, `:doct
 |---|---|---|
 | CAPCOM | User-facing project manager (main session) | |
 | Houston | Project orchestrator | |
-| Flight | Mission sub-orchestrator running the Ralph-style loop | `ralph-wiggum-loop`, `ai-collab-dev` |
+| Flight | Mission sub-orchestrator running the Ralph-style loop | Interstage-native loop prompt (derived from `ralph-wiggum-loop` and `ai-collab-dev`), `baby-steps` |
 | FIDO | Planner and architect | `exhaustive-specification`, `data-flow-architect`, `best-practice-guide` |
 | Sojourner, Ingenuity | Read-only scouts (cheap and broad) | `context-pack` |
 | Hubble | Research: libraries, docs, prior art | |
@@ -89,13 +89,13 @@ Extension-registered: `/interstage:init`, `:launch`, `:status`, `:abort`, `:doct
 | Go/No-Go | QA | `testing-*`, `test-*` |
 | Orbiter | Integration, e2e and contract tests | `testing-integration`, `testing-e2e`, `testing-api` |
 | Inspector | Independent verifier and gap analyst | `trust-but-verify`, `completeness-validator`, `reality-validation`, `testing-expected-results`, `gap-analysis`, `spec-gap-analysis`, `test-gap-analysis` |
-| Kessler | Security red team | `redteam`, `white-hat`, `security-scan`, `testing-security` |
+| Kessler | Security review (static only: code, config, dependencies, threat models) | `redteam`, `white-hat`, `security-scan`, `testing-security`, without the upstream scripts |
 | Pogo | Devil's advocate on plans, specs and assumptions | `devils-advocate`, `assumption-buster`, `assumption-testing`, `adversarial-thinking` |
 | Tiger Team | Debugging and incident response | `sherlock-debugging`, `stepwise-testing`, `incident-response`, `log-analysis-parsing` |
 | Booster | DevOps and CI | `git-release` |
-| Golden Record | Documentation | `api-documentation`, `index` |
+| Golden Record | Documentation | `api-documentation`, `index` (writes `_index.md` files into the repo only on explicit request) |
 
-Agents preload skills through `autoloadSkills`. Skills stay skills.
+Skill names in the table are upstream names. In the repo each carries an `is-` prefix. Agents autoload 1-3 core skills and read the rest on demand.
 
 ### Packs
 
@@ -190,6 +190,42 @@ OMP ships about 40 language servers in `defaults.json`, auto-detected per projec
 - To confirm: which GitHub account owns the canonical upstream repo. This is a practical check, not legal advice.
 - Vendored skills need adaptation: replace `compatibility: opencode` frontmatter and OpenCode-specific scripts.
 
+## Skill adaptation
+
+Audit of `/Users/levi/projects/skills/skills` (72 skills). Every skill has `compatibility: opencode` in its frontmatter and a templated per-skill `README.md` with an `npx skills add wojons/skills` install line. `SKILL.md` files total about 680 KB. There are 82 non-stub scripts (81 bash, 1 python) and 28 byte-identical placeholder `example.sh` stubs. The scripts are mostly grep, jq and find analysis helpers. Some use `stat`, `bc` or `date`/`sed` options that differ between macOS and Linux.
+
+### Decisions
+
+| Topic | Decision |
+|---|---|
+| Visibility | Skills stay visible in the skill list. The `--interstage` flag only gates agents, commands and persona. Only core skills are visible by default. Packs are opt-in installs, so their skills appear only when installed. Consequence: the claim "plain `omp` stays stock" is weakened to "plain `omp` gains the core skills in its skill list". |
+| Names | Every vendored skill gets an `is-` prefix (for example `is-baby-steps`). A mapping table from upstream name to Interstage name is kept for syncing. |
+| Loading | Each agent autoloads 1-3 core skills. The agent prompt lists other skills to read on demand with `skill://<name>`. |
+| Scripts | Drop the stubs. Keep only scripts that a skill workflow actually calls, after a shellcheck and macOS/Linux portability pass. Anything unreviewed is left out. |
+| Per-skill READMEs | Dropped (templated, install line points at upstream). |
+| Security scope | Kessler is static review only in v1: code, config, dependencies and threat models. The upstream recon and scan scripts are not vendored. OMP's built-in `security_scan` tool is available. Active testing is out of scope. |
+| Adversary behavior | No findings quota. Every finding needs evidence (file:line, repro or a cited spec clause). A clean report is valid. Applies to Pogo, Inspector and Kessler. This overrides the upstream "find at least 3 issues" rule in `HIERARCHICAL_AGENTS.md`. |
+| Commit format | `<TODO-ID>: <imperative title>`, for example `T-014: Add JWT token generation`. Flight names each isolated task this way, since the task name becomes the commit message. |
+| Spec depth | FIDO picks the spec set from the project type and the plan gate approves it. Always-on: Foundation and Quality specs. The "blind-person" detail standard applies to UI specs only. Other specs use "complete and unambiguous, nothing left to guess". The standard lane uses a single `SPEC.md`. Specs live in `.interstage/missions/<id>/specs/`. |
+
+### Lifecycle skill dispositions
+
+| Upstream skill | Disposition |
+|---|---|
+| `ai-collab-dev` | Rewritten as Interstage-native mission lifecycle docs and `/interstage:plan`. Keep `chunk-conversation.sh` (for `/interstage:import`) and `validate-todo.sh` (TODO checks) after the portability pass. Drop `setup-ralph-project.sh` (replaced by `/interstage:init`). |
+| `ralph-wiggum-loop` | Rewritten as the Flight loop prompt, the steering-packet schema and the stuck rule. The Python runner, plugin system and dashboard are not shipped. |
+| `workflow-orchestrator` | Dropped. Its patterns map to the fast, standard and full lanes. Its SKILL.md documents `npm run workflow:*` commands that do not match its three bundled shell scripts. |
+| `baby-steps` | Vendored and trimmed. Keep the six rules and the context modes. Drop human-time step durations, overhead percentages, team coordination and PR cadence. Commits follow the format above. |
+| `exhaustive-specification` | Vendored and tiered as above. |
+
+Content derived from rewritten skills is still credited in `THIRD_PARTY_NOTICES.md`.
+
+### Vendoring bookkeeping
+
+- `THIRD_PARTY_NOTICES.md` carries the upstream LICENSE verbatim and the source commit.
+- A manifest maps each vendored skill to its upstream path, the upstream commit, the Interstage name and whether it was modified.
+- Frontmatter: remove `compatibility: opencode`, keep `license: MIT`, add the `is-` name. Unknown keys are preserved by OMP as metadata, so `metadata:` can stay.
+
 ## Spike results
 
 Run with `omp` 18.11.3, headless (`-p`), `claude-haiku-4-5`, a throwaway extension and a throwaway marketplace plugin in `/tmp`. All five original spikes pass. The spikes also changed the design in four places.
@@ -217,6 +253,9 @@ Run with `omp` 18.11.3, headless (`-p`), `claude-haiku-4-5`, a throwaway extensi
 - `before_subagent_spawn` receives `agent`, `invocationKind`, `modelRole`, `patterns` and `spawnKey`. Returning `{ block: true, reason }` fails the spawn and the reason reaches the caller.
 - Slash commands run under `-p`.
 - Subagent depth numbering: main is 0. CAPCOM (0) -> Houston (1) -> Flight (2) -> specialist (3) needs `task.maxRecursionDepth` of at least 3.
+- Skill visibility: `disable-model-invocation: true` (and `hide: true`) remove a skill from the model-visible listing in plain `omp`, while `autoload-skills` still injects it into an agent. Not adopted for Interstage (see "Skill adaptation").
+- Agent visibility: overriding `task.disabledAgents` to `["spikeagent"]` in a main session started without `--interstage` hid the plugin agent (the model saw no agents). With `--interstage` the agent spawned and ran.
+- Skill and agent discovery is global once a plugin is installed. Without the override, skills and agents of an installed plugin appear in every `omp` session.
 
 ### Not verified
 
@@ -244,7 +283,8 @@ No hardware-specific design in v1. Build, test and verify commands are configura
 
 ## Open questions
 
-1. Skill adaptation: per-skill pass, starting with `ai-collab-dev`, `ralph-wiggum-loop`, `baby-steps`, `workflow-orchestrator` and `exhaustive-specification`. The last three are unread.
-2. Confirm the assumptions marked "assumed" (extension duties, LSP policy and doctor, framework tests, hardware seams).
-3. MCP: which servers `/interstage:init` offers, and how it handles credentials (for example the GitHub token).
-4. Interactive-mode behavior was not spiked (see "Not verified" above).
+1. Skill adaptation: execute the dispositions above, and read `data-flow-architect`, `best-practice-guide`, `context-pack`, `completeness-validator` and the 25 or so thin `testing-*` skills before trimming them. Verify script portability on macOS and Linux.
+2. Agents are hidden outside Interstage sessions through a `task.disabledAgents` override (verified). Confirm this still applies now that skills stay visible.
+3. Confirm the assumptions marked "assumed" (extension duties, LSP policy and doctor, framework tests, hardware seams).
+4. MCP: which servers `/interstage:init` offers, and how it handles credentials (for example the GitHub token).
+5. Interactive-mode behavior was not spiked (see "Not verified" above).
