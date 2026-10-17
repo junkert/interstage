@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      NX_NO_CLOUD: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install shellcheck (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate, typecheck and test (pull request: affected projects)
+        if: github.event_name == 'pull_request'
+        run: bunx nx affected -t validate typecheck test --base=origin/${{ github.base_ref }} --head=HEAD
+
+      - name: Validate, typecheck and test (push: all projects)
+        if: github.event_name != 'pull_request'
+        run: bunx nx run-many -t validate typecheck test
+
+      - name: Shellcheck
+        run: bash tools/shellcheck.sh

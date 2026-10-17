@@ -1,0 +1,27 @@
+{
+  "name": "interstage-workspace",
+  "private": true,
+  "type": "module",
+  "description": "Workspace root for Interstage: OMP plugins, tools and tests.",
+  "license": "MIT",
+  "workspaces": [
+    "plugins/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "validate": "nx run-many -t validate",
+    "typecheck": "nx run-many -t typecheck",
+    "test": "nx run-many -t test",
+    "shellcheck": "bash tools/shellcheck.sh",
+    "check": "nx run-many -t validate typecheck test && bash tools/shellcheck.sh"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "18.11.3",
+    "@types/bun": "1.4.3",
+    "nx": "23.3.0",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "bun": ">=1.3.14"
+  }
+}

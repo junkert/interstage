@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "neverConnectToCloud": true,
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "sharedGlobals": ["{workspaceRoot}/tsconfig.base.json", "{workspaceRoot}/package.json"]
+  },
+  "targetDefaults": {
+    "validate": {
+      "cache": true,
+      "inputs": ["{workspaceRoot}/plugins/**/*", "{workspaceRoot}/.omp-plugin/**/*", "{workspaceRoot}/skills.manifest.json", "{workspaceRoot}/THIRD_PARTY_NOTICES.md", "{projectRoot}/**/*"]
+    },
+    "typecheck": {
+      "cache": true,
+      "inputs": ["default"]
+    },
+    "test": {
+      "cache": true,
+      "inputs": ["default"]
+    }
+  }
+}

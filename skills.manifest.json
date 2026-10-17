@@ -1,0 +1,9 @@
+{
+  "upstream": {
+    "repo": "https://github.com/wojons/skills",
+    "sha": "5fe7152c66604a967e53ce3aa4882d3fce00072f",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2025 lexykwaii"
+  },
+  "skills": []
+}
