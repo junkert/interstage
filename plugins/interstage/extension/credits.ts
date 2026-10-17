@@ -120,3 +120,30 @@ export async function commitProblem(exec: GitExec, cwd: string, itemId: string, 
   }
   return undefined;
 }
+
+function field(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+/**
+ * The reason a `task` call by flight or houston spawns an executor wrongly, or undefined. Mirrors OMP's spawn list:
+ * the `tasks` batch when present (an item's `isolated` wins over the top-level flag, its `agent` is its own),
+ * otherwise the one flat spawn. Only executor agents are checked: an executor must run isolated, on a task branch
+ * named exactly its TODO id, or its work lands in the shared checkout with no branch to merge.
+ */
+export function taskSpawnProblem(input: unknown): string | undefined {
+  const batch = field(input, "tasks");
+  const items: { agent: unknown; name: unknown; isolated: unknown }[] =
+    Array.isArray(batch) && batch.length > 0
+      ? batch.map(item => ({ agent: field(item, "agent"), name: field(item, "name"), isolated: field(item, "isolated") ?? field(input, "isolated") }))
+      : [{ agent: field(input, "agent"), name: field(input, "name"), isolated: field(input, "isolated") }];
+  for (const item of items) {
+    const agent = typeof item.agent === "string" ? item.agent.trim().toLowerCase() : "";
+    if (!Object.hasOwn(EXECUTORS, agent)) continue;
+    const name = typeof item.name === "string" ? item.name : "";
+    if (item.isolated !== true || !/^T-\d{3,}$/.test(name)) {
+      return `An ${agent} spawn must set isolated to true and name the task exactly the TODO id (for example T-001), so its work lands on its own omp/task branch.`;
+    }
+  }
+  return undefined;
+}

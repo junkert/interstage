@@ -5,7 +5,7 @@ import { loadPersona, type Runtime } from "./activation";
 import { checkBudgets } from "./budget";
 import { DEFAULT_CONFIG } from "./config";
 import { ENV_MISSION_ID, ENV_STATE_DIR, MISSION_TOOL_AGENTS, type Approval, type InterstageConfig, type MissionRecord, type UsageRecord } from "./contracts";
-import { recordMerge, recordSpawn } from "./credits";
+import { recordMerge, recordSpawn, taskSpawnProblem } from "./credits";
 import { blockReason, classifyCommand, decideGate, hasApproval, normalizeCommand, orchestratorBashProblem } from "./gates";
 import { appendUsage, isoNow, loadApprovals, loadEffectiveConfig, loadMission, loadUsage, missionDirOf, saveMission, withMissionLock } from "./state";
 import { join } from "node:path";
@@ -128,6 +128,10 @@ export function createHooks(deps: HookDeps) {
 
     async toolCall(event: { toolName: string; input: object }, ctx: HookCtx): Promise<{ block: true; reason: string } | undefined> {
       if (ctx.agent.kind === "main") return runtime.active ? capcomLimit(event) : undefined;
+      if (event.toolName === "task" && (ctx.agent.name === "flight" || ctx.agent.name === "houston")) {
+        const problem = taskSpawnProblem(event.input);
+        return problem === undefined ? undefined : { block: true, reason: problem };
+      }
       if (event.toolName !== "bash") return undefined;
       const command = "command" in event.input ? event.input.command : undefined;
       if (typeof command !== "string") return undefined;

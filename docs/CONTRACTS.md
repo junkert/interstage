@@ -94,6 +94,8 @@ Process evidence (a real run on a small model showed Flight skipping verifier sp
 - `verify_clean` and `verify_failed` consume one `go-no-go` spawn and one `inspector` spawn each.
 - `integrate_ok` requires a recorded `git merge ... omp/task/<ID>` (any `-N` suffix) for that item dated after its latest `builder_done`, and that `commit` names a commit that exists, whose subject starts with `<ID>: `.
 - A transition that lacks a credit is an error that names the missing spawn or merge and says to spawn the agent or run the merge.
+- A `task` call by `flight` or `houston` that spawns an executor agent must set `isolated: true` (on the item or at the top level) and name the item exactly `<TODO-ID>`; otherwise the hook blocks it (observed: builders run in the shared checkout, in parallel, with no task branch).
+- `set_status complete` requires at least one item and every item `done`; the error lists the open items.
 - Flight and Houston may run bash for read-only inspection and git only (allowlist in section 4); they cannot create or modify project files through bash.
 
 ## 4. Gates

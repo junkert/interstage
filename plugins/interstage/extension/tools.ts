@@ -529,6 +529,14 @@ async function setStatus(deps: MissionDeps, active: Active, status: "paused" | "
     if (mission.status === "halted" && status !== "halted" && deps.caller !== "main") {
       return err(`Mission ${mission.id} was halted (${mission.statusReason ?? "no reason recorded"}); only CAPCOM can change its status.`);
     }
+    if (status === "complete") {
+      const items = await loadItems(active.dir);
+      const open = items.filter(item => item.state !== "done");
+      if (items.length === 0 || open.length > 0) {
+        const what = items.length === 0 ? "the mission has no items" : `open items: ${open.map(item => `${item.id} (${item.state})`).join(", ")}`;
+        return err(`Mission ${mission.id} cannot be completed: ${what}. Finish every item, or drop unstarted ones with plan_set; if you cannot, pause the mission and report the open items to your orchestrator.`);
+      }
+    }
     const resumed = mission.status === "halted" && status === "running";
     const next: MissionRecord = { ...mission, status, statusReason: reason, breaker: resumed ? { consecutiveFailures: 0 } : mission.breaker };
     await saveMission(active.dir, next);

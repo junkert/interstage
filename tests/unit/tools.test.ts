@@ -215,10 +215,12 @@ describe("create", () => {
 
   test("refuses while another mission is active, but allows a new one after it completes", async () => {
     const sb = await sandbox();
-    await newMission(sb);
+    const dir = await newMission(sb);
     const second = await call(sb, "houston", { action: "create", title: "again", lane: "fast", brief: "b" });
     expect(second).toMatchObject({ ok: false, text: expect.stringContaining("still running") });
-    await call(sb, "main", { action: "set_status", status: "complete", reason: "done" });
+    await plan(sb);
+    for (const item of await loadItems(dir)) await saveItem(dir, { ...item, state: "done" });
+    expect((await call(sb, "main", { action: "set_status", status: "complete", reason: "done" })).ok).toBe(true);
     await git(sb.repo, "switch", "-q", "main");
     expect((await call(sb, "houston", { action: "create", title: "again", lane: "fast", brief: "b" })).ok).toBe(true);
     expect(sb.env.INTERSTAGE_MISSION_ID).toBe("M-002");
@@ -596,6 +598,51 @@ describe("process evidence (credits)", () => {
     await saveItem(dir, { ...(await loadItems(dir))[0]!, state: "failed", failures: 1 });
     expect((await t("T-001", "start")).ok).toBe(false);
     expect((await t("T-001", "retry")).ok).toBe(true);
+  });
+});
+
+describe("set_status complete", () => {
+  const complete = (sb: Sandbox, caller = "main") => call(sb, caller, { action: "set_status", status: "complete", reason: "all done" });
+
+  test("is refused for a mission with no items", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    const refused = await complete(sb);
+    expect(refused).toMatchObject({ ok: false, text: expect.stringContaining("no items") });
+    expect((await loadMission(dir))?.status).toBe("running");
+  });
+
+  test("is refused while any item is open, listing each with its state", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    const [first] = await loadItems(dir);
+    await saveItem(dir, { ...first!, state: "done" });
+    const refused = await complete(sb, "flight");
+    expect(refused.ok).toBe(false);
+    expect(refused.text).toContain("T-002 (pending)");
+    expect(refused.text).not.toContain("T-001");
+    expect(refused.text).toContain("plan_set");
+    expect(refused.text).toContain("pause");
+    expect((await loadMission(dir))?.status).toBe("running");
+  });
+
+  test("is allowed when every item is done, and the mission is then complete", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    for (const item of await loadItems(dir)) await saveItem(dir, { ...item, state: "done" });
+    expect((await complete(sb, "houston")).ok).toBe(true);
+    expect((await loadMission(dir))?.status).toBe("complete");
+  });
+
+  test("a blocked item still keeps the mission from completing; pausing is unaffected", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    for (const item of await loadItems(dir)) await saveItem(dir, { ...item, state: item.id === "T-001" ? "done" : "blocked" });
+    expect((await complete(sb)).text).toContain("T-002 (blocked)");
+    expect((await call(sb, "flight", { action: "set_status", status: "paused", reason: "report" })).ok).toBe(true);
   });
 });
 

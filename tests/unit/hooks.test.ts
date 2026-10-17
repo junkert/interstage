@@ -631,3 +631,66 @@ describe("flight and houston bash allowlist", () => {
     expect(shown.filter(command => orchestratorBashProblem(command) !== undefined)).toEqual([]);
   });
 });
+
+describe("flight and houston executor spawns", () => {
+  const task = (input: object) => ({ toolName: "task", input });
+  const EXECUTOR_NAMES = ["curiosity", "perseverance", "orbiter", "tiger-team", "golden-record", "booster"];
+
+  test("flat form: an executor must be isolated and named exactly the TODO id", async () => {
+    const sb = await sandbox();
+    const { hooks } = hooksFor(sb.env);
+    for (const name of ["flight", "houston"]) {
+      const ctx = ctxOf("sub", name).ctx;
+      expect(await hooks.toolCall(task({ agent: "curiosity", name: "T-014", isolated: true, task: "x" }), ctx)).toBeUndefined();
+      for (const bad of [
+        { agent: "curiosity", name: "T-014", task: "x" },
+        { agent: "curiosity", name: "T-014", isolated: false, task: "x" },
+        { agent: "curiosity", name: "T-014: add thing", isolated: true, task: "x" },
+        { agent: "curiosity", name: "build-login", isolated: true, task: "x" },
+        { agent: "curiosity", name: "T-14", isolated: true, task: "x" },
+        { agent: "curiosity", isolated: true, task: "x" },
+      ]) {
+        const result = await hooks.toolCall(task(bad), ctx);
+        expect([name, JSON.stringify(bad), result?.block]).toEqual([name, JSON.stringify(bad), true]);
+        expect(result?.reason).toContain("isolated to true");
+        expect(result?.reason).toContain("TODO id");
+      }
+    }
+  });
+
+  test("every executor agent is checked, case and whitespace tolerant", async () => {
+    const sb = await sandbox();
+    const { hooks } = hooksFor(sb.env);
+    const flight = ctxOf("sub", "flight").ctx;
+    for (const agent of EXECUTOR_NAMES) {
+      expect([agent, (await hooks.toolCall(task({ agent, name: "x", task: "t" }), flight))?.block]).toEqual([agent, true]);
+      expect([agent, await hooks.toolCall(task({ agent, name: "T-001", isolated: true, task: "t" }), flight)]).toEqual([agent, undefined]);
+    }
+    expect((await hooks.toolCall(task({ agent: " Curiosity ", name: "x", task: "t" }), flight))?.block).toBe(true);
+  });
+
+  test("batch form: each executor item is checked; the item's isolated wins over the top-level flag", async () => {
+    const sb = await sandbox();
+    const { hooks } = hooksFor(sb.env);
+    const ctx = ctxOf("sub", "flight").ctx;
+    const ok = { agent: "curiosity", name: "T-001", task: "a" };
+    expect(await hooks.toolCall(task({ context: "c", isolated: true, tasks: [ok, { ...ok, name: "T-002" }] }), ctx)).toBeUndefined();
+    expect(await hooks.toolCall(task({ context: "c", tasks: [{ ...ok, isolated: true }, { ...ok, name: "T-002", isolated: true }] }), ctx)).toBeUndefined();
+    expect((await hooks.toolCall(task({ context: "c", tasks: [{ ...ok, isolated: true }, { ...ok, name: "T-002" }] }), ctx))?.block).toBe(true);
+    expect((await hooks.toolCall(task({ context: "c", isolated: true, tasks: [ok, { ...ok, name: "T-002", isolated: false }] }), ctx))?.block).toBe(true);
+    expect((await hooks.toolCall(task({ context: "c", isolated: true, tasks: [ok, { ...ok, name: "second" }] }), ctx))?.block).toBe(true);
+  });
+
+  test("verifiers, scouts, planners and unknown agents are not checked, and neither are other agents' task calls", async () => {
+    const sb = await sandbox();
+    const { hooks } = hooksFor(sb.env);
+    const flight = ctxOf("sub", "flight").ctx;
+    for (const agent of ["go-no-go", "inspector", "kessler", "fido", "pogo", "hubble", "sojourner", "ingenuity", "task"]) {
+      expect([agent, await hooks.toolCall(task({ agent, name: "verify", task: "t" }), flight)]).toEqual([agent, undefined]);
+    }
+    expect(await hooks.toolCall(task({ context: "c", tasks: [{ agent: "go-no-go", name: "a", task: "t" }, { agent: "inspector", name: "b", task: "t" }] }), flight)).toBeUndefined();
+    const bad = task({ agent: "curiosity", name: "free text", task: "x" });
+    for (const name of ["fido", "curiosity", "go-no-go"]) expect(await hooks.toolCall(bad, ctxOf("sub", name).ctx)).toBeUndefined();
+    expect(await hooks.toolCall(bad, ctxOf("main").ctx)).toBeUndefined();
+  });
+});
