@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ROLE_TIERS, doctorReport, gitignoreHasEntry, runAbort, runInit, runStatus, type CommandEnv } from "../../plugins/interstage/extension/commands";
 import { saveItem, saveMission } from "../../plugins/interstage/extension/state";
-import { clock, fakeUi, git, item, mission, realExec, sandbox, tempDir, tempRepo, type Sandbox } from "./support";
+import { clock, usageLine, fakeUi, git, item, mission, realExec, sandbox, tempDir, tempRepo, type Sandbox } from "./support";
 
 type Ui = ReturnType<typeof fakeUi>;
 
@@ -110,7 +110,7 @@ describe("/interstage:status", () => {
     await saveMission(dir, mission({ breaker: { consecutiveFailures: 2 } }));
     await saveItem(dir, item("T-001", { state: "done" }));
     await saveItem(dir, item("T-002", { state: "building", failures: 1 }));
-    await writeFile(join(dir, "usage.jsonl"), `${JSON.stringify({ at: clock(), agent: "main", kind: "main", input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 1234, cost: 0 })}\n`);
+    await writeFile(join(dir, "usage.jsonl"), usageLine("main", 1234, { kind: "main", cacheRead: 900_000 }));
     const ui = fakeUi();
     const c = envFor(sb, ui);
     c.env.INTERSTAGE_MISSION_ID = "M-001";
@@ -119,7 +119,8 @@ describe("/interstage:status", () => {
     expect(text).toContain("Mission M-001: Test mission");
     expect(text).toContain("done 1, building 1");
     expect(text).toContain("T-002 [building]");
-    expect(text).toContain("mission 1234 of 2000000 tokens");
+    expect(text).toContain("billable tokens, cache reads excluded): mission 1234 of 2000000");
+    expect(text).toContain("cache reads (not counted) 900000");
     expect(text).toContain("2 of 5 consecutive failures");
   });
 

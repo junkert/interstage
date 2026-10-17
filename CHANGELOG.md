@@ -4,6 +4,10 @@ All notable changes to Interstage are recorded here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- Token budgets count billable tokens (`input + output + cacheWrite`) and exclude cache reads, which made a budget grow with conversation length squared. Status and the budget view show cache reads separately; usage records missing the token fields are reported as malformed.
+
 ### Added
 
 - Marketplace catalog `.omp-plugin/marketplace.json` with six plugins: the core plugin `interstage` and the packs `interstage-observability`, `interstage-web`, `interstage-data`, `interstage-ops` and `interstage-forge`.

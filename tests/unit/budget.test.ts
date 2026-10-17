@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { checkBudgets, parseUsageJsonl, sumTokens } from "../../plugins/interstage/extension/budget";
+import { checkBudgets, parseUsageJsonl, sumCacheReads, sumTokens } from "../../plugins/interstage/extension/budget";
 import type { UsageRecord } from "../../plugins/interstage/extension/contracts";
 
 const rec = (agent: string, totalTokens: number, pogoLoop?: number): UsageRecord => ({
   at: "t",
   agent,
   kind: "sub",
-  input: 0,
+  input: totalTokens,
   output: 0,
   cacheRead: 0,
   cacheWrite: 0,
@@ -27,6 +27,24 @@ describe("sumTokens", () => {
   test("empty is zero; records without a loop never match a loop filter", () => {
     expect(sumTokens([])).toBe(0);
     expect(sumTokens([rec("pogo", 5)], { pogoLoop: 0 })).toBe(0);
+  });
+});
+
+describe("billable tokens", () => {
+  const full = (over: Partial<UsageRecord>): UsageRecord => ({ ...rec("flight", 0), ...over });
+
+  test("count input + output + cacheWrite and ignore cacheRead and totalTokens", () => {
+    const r = full({ input: 10, output: 20, cacheWrite: 5, cacheRead: 1_000_000, totalTokens: 1_000_035 });
+    expect(sumTokens([r])).toBe(35);
+    expect(sumCacheReads([r, r])).toBe(2_000_000);
+  });
+
+  test("a huge cacheRead does not exceed the budget; output pushes it over", () => {
+    const limits = { pogoLoopTokens: 100, missionTokens: 1000 };
+    const reread = full({ input: 100, output: 50, cacheRead: 5_000_000, totalTokens: 5_000_150 });
+    expect(checkBudgets([reread, reread, reread], limits, 0)).toMatchObject({ missionUsed: 450, missionExceeded: false });
+    const over = checkBudgets([reread, reread, reread, full({ output: 551 })], limits, 0);
+    expect(over).toMatchObject({ missionUsed: 1001, missionExceeded: true, missionRemaining: 0 });
   });
 });
 
@@ -61,6 +79,12 @@ describe("parseUsageJsonl", () => {
     expect(r.records).toHaveLength(2);
     expect(r.records[0]?.pogoLoop).toBe(2);
     expect(r.errors).toEqual(["line 3: invalid JSON", "line 4: not a usage record"]);
+  });
+  test("records missing the token fields are malformed, even with totalTokens", () => {
+    const { input: _input, ...noInput } = rec("pogo", 5);
+    const r = parseUsageJsonl(`${JSON.stringify(noInput)}\n${JSON.stringify({ ...rec("pogo", 5), cacheWrite: "x" })}\n`);
+    expect(r.records).toEqual([]);
+    expect(r.errors).toEqual(["line 1: not a usage record", "line 2: not a usage record"]);
   });
   test("empty text yields nothing", () => expect(parseUsageJsonl("")).toEqual({ records: [], errors: [] }));
 });

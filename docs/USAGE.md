@@ -137,6 +137,7 @@ While a mission is `paused` or `halted`, the extension blocks every new subagent
 ## Budgets and the circuit breaker
 
 - Every assistant message in every session (CAPCOM and subagents) appends a usage record to the mission's `usage.jsonl`, or to `usage.jsonl` in the state directory outside a mission.
+- Budgets count billable tokens: `input + output + cacheWrite` per record. Cache reads are excluded, because every turn re-reads the whole conversation from the cache and counting them would measure conversation length rather than work done. `totalTokens` and `cacheRead` stay in each record, and `/interstage:status` and `mission get budget` show cache reads as a separate figure.
 - `budgets.missionTokens` caps the mission total. When the total goes over it the mission is set to `halted` and you are notified.
 - `budgets.pogoLoopTokens` caps Pogo's tokens within the current Pogo loop. Over the cap, new `pogo` spawns are blocked until Houston resets the loop; the escalation reaches you through CAPCOM.
 - Gate G, `breaker.consecutiveFailures`: each failed build or failed verification adds one to a consecutive count, and a verified, integrated item resets it. When the count reaches the limit the mission is `halted`, even in autopilot. CAPCOM explains from the failure history and offers options: revise the plan, change scope, raise a budget in config, or abort.

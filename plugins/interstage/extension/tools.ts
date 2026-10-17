@@ -19,7 +19,7 @@ import {
   type SteeringPacket,
   type SteeringSignal,
 } from "./contracts";
-import { checkBudgets } from "./budget";
+import { checkBudgets, sumCacheReads } from "./budget";
 import { decideGate, hasApproval } from "./gates";
 import { validateFindings } from "./severity";
 import { applyPending, writePacket } from "./steering";
@@ -434,6 +434,7 @@ async function getState(deps: MissionDeps, active: Active, scope: string, itemId
       const exceeded = budget.missionExceeded ? "mission" : budget.pogoExceeded ? "pogo" : undefined;
       const data = {
         ...budget,
+        cacheReads: sumCacheReads(usage),
         pogoLoop: mission.pogoLoop,
         breaker: { consecutiveFailures: mission.breaker.consecutiveFailures, limit: config.breaker.consecutiveFailures },
         status: mission.status,
@@ -441,8 +442,8 @@ async function getState(deps: MissionDeps, active: Active, scope: string, itemId
       };
       const text =
         exceeded === undefined
-          ? `Mission used ${budget.missionUsed} tokens (${budget.missionRemaining} left); Pogo loop ${mission.pogoLoop} used ${budget.pogoUsed} (${budget.pogoRemaining} left).`
-          : `budget_exceeded: the ${exceeded} budget is exhausted (mission ${budget.missionUsed}, Pogo loop ${budget.pogoUsed} tokens).`;
+          ? `Mission used ${budget.missionUsed} billable tokens (cache reads excluded; ${budget.missionRemaining} left); Pogo loop ${mission.pogoLoop} used ${budget.pogoUsed} (${budget.pogoRemaining} left). Cache reads, reported separately: ${sumCacheReads(usage)}.`
+          : `budget_exceeded: the ${exceeded} budget is exhausted (billable tokens, cache reads excluded: mission ${budget.missionUsed}, Pogo loop ${budget.pogoUsed}).`;
       return ok(text, data, exceeded === "pogo" ? "houston must reset_pogo_loop before spawning pogo again" : undefined);
     }
   }

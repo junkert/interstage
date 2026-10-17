@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { ApplyContext } from "../../plugins/interstage/extension/state";
 import { DEFAULT_CONFIG } from "../../plugins/interstage/extension/config";
 import type { GitExec } from "../../plugins/interstage/extension/tools";
-import type { Approval, ItemRecord, MissionRecord } from "../../plugins/interstage/extension/contracts";
+import type { Approval, ItemRecord, MissionRecord, UsageRecord } from "../../plugins/interstage/extension/contracts";
 
 const created: string[] = [];
 
@@ -147,3 +147,13 @@ export function fakeUi(answers: { confirm?: boolean | boolean[]; select?: (strin
     },
   };
 }
+
+/** A usage record; `billable` is split across input/output so the budget unit (input + output + cacheWrite) equals it. */
+export function usageRecord(agent: string, billable: number, extra: Partial<UsageRecord> = {}): UsageRecord {
+  const input = Math.floor(billable / 2);
+  const output = billable - input;
+  const cacheRead = extra.cacheRead ?? 0;
+  return { at: CLOCK, agent, kind: "sub", input, output, cacheRead, cacheWrite: 0, totalTokens: input + output + cacheRead, cost: 0, ...extra };
+}
+
+export const usageLine = (agent: string, billable: number, extra: Partial<UsageRecord> = {}): string => `${JSON.stringify(usageRecord(agent, billable, extra))}\n`;

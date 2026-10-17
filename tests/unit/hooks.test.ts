@@ -5,7 +5,7 @@ import { createRuntime, type Runtime } from "../../plugins/interstage/extension/
 import { createHooks, type HookCtx } from "../../plugins/interstage/extension/hooks";
 import { saveApprovals, saveMission, loadMission, loadUsage } from "../../plugins/interstage/extension/state";
 import type { Approval, MissionRecord } from "../../plugins/interstage/extension/contracts";
-import { CLOCK, clock, fakeUi, granted, mission, sandbox, type Sandbox } from "./support";
+import { CLOCK, clock, usageRecord, fakeUi, granted, mission, sandbox, type Sandbox } from "./support";
 
 const ctxOf = (kind: "main" | "sub", name = kind === "main" ? "main" : "task") => {
   const ui = fakeUi();
@@ -149,7 +149,7 @@ describe("before_subagent_spawn", () => {
   test("blocks pogo once the Pogo loop budget is exceeded and unblocks after a reset", async () => {
     const sb = await sandbox("budgets:\n  pogoLoopTokens: 100\n");
     const dir = await withMission(sb);
-    const record = (agent: string, pogoLoop: number, totalTokens: number) => JSON.stringify({ at: CLOCK, agent, pogoLoop, kind: "sub", input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens, cost: 0 });
+    const record = (agent: string, pogoLoop: number, billable: number) => JSON.stringify(usageRecord(agent, billable, { pogoLoop }));
     await writeFile(join(dir, "usage.jsonl"), [record("pogo", 0, 101), record("fido", 0, 5000)].join("\n") + "\n");
     const { hooks } = hooksFor(sb.env);
     expect(await hooks.beforeSubagentSpawn({ agent: "pogo" })).toMatchObject({ block: true, reason: expect.stringContaining("reset the Pogo loop") });
@@ -328,6 +328,8 @@ describe("tool_call gates", () => {
 
 describe("message_end", () => {
   const message = (totalTokens: number) => ({ role: "assistant", usage: { input: 3, output: 4, cacheRead: 1, cacheWrite: 2, totalTokens, cost: { total: 0.5 } } });
+  /** A message whose billable size (input + output + cacheWrite) is `billable`; the cache read is huge and never counts. */
+  const billable = (n: number) => ({ role: "assistant", usage: { input: n, output: 0, cacheRead: 9_000_000, cacheWrite: 0, totalTokens: n + 9_000_000, cost: { total: 0 } } });
 
   test("appends a UsageRecord with the mission's pogoLoop, the agent name and kind", async () => {
     const sb = await sandbox();
@@ -371,12 +373,23 @@ describe("message_end", () => {
     const dir = await withMission(sb);
     const { hooks } = hooksFor(sb.env);
     const main = ctxOf("main");
-    await hooks.messageEnd({ message: message(100) }, main.ctx);
+    await hooks.messageEnd({ message: billable(100) }, main.ctx);
     expect((await loadMission(dir))?.status).toBe("running");
-    await hooks.messageEnd({ message: message(1) }, main.ctx);
+    await hooks.messageEnd({ message: billable(1) }, main.ctx);
     expect(await loadMission(dir)).toMatchObject({ status: "halted", statusReason: expect.stringContaining("token budget") });
-    await hooks.messageEnd({ message: message(1) }, main.ctx);
+    await hooks.messageEnd({ message: billable(1) }, main.ctx);
     expect(main.ui.notes.filter(n => n.message.includes("halted"))).toHaveLength(1);
+  });
+
+  test("huge cache reads alone never halt a mission; billable output does", async () => {
+    const sb = await sandbox("budgets:\n  missionTokens: 1000\n");
+    const dir = await withMission(sb);
+    const { hooks } = hooksFor(sb.env);
+    for (let i = 0; i < 5; i++) await hooks.messageEnd({ message: billable(100) }, ctxOf("main").ctx);
+    expect((await loadUsage(join(dir, "usage.jsonl"))).reduce((n, r) => n + r.totalTokens, 0)).toBeGreaterThan(40_000_000);
+    expect((await loadMission(dir))?.status).toBe("running");
+    await hooks.messageEnd({ message: { role: "assistant", usage: { input: 0, output: 501, cacheRead: 9_000_000, cacheWrite: 0, totalTokens: 9_000_501, cost: { total: 0 } } } }, ctxOf("main").ctx);
+    expect((await loadMission(dir))?.status).toBe("halted");
   });
 
   test("a breaker count at the limit halts the mission", async () => {
@@ -389,7 +402,7 @@ describe("message_end", () => {
   test("a paused mission is not changed by usage", async () => {
     const sb = await sandbox("budgets:\n  missionTokens: 1\n");
     const dir = await withMission(sb, { status: "paused" });
-    await hooksFor(sb.env).hooks.messageEnd({ message: message(50) }, ctxOf("main").ctx);
+    await hooksFor(sb.env).hooks.messageEnd({ message: billable(50) }, ctxOf("main").ctx);
     expect((await loadMission(dir))?.status).toBe("paused");
   });
 

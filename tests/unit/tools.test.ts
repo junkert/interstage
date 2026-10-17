@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { ACTION_CALLERS, type MissionToolInput } from "../../plugins/interstage/extension/contracts";
 import { executeMission, missionParameters, parseMissionInput, registerMissionTool, type MissionDeps } from "../../plugins/interstage/extension/tools";
 import { loadApprovals, loadItems, loadMission, saveItem } from "../../plugins/interstage/extension/state";
-import { CLOCK, BLOCKER, clock, git, realExec, sandbox, tempDir, type Sandbox } from "./support";
+import { CLOCK, BLOCKER, usageLine, clock, git, realExec, sandbox, tempDir, type Sandbox } from "./support";
 
 const TODO = `# Plan
 
@@ -435,7 +435,7 @@ describe("transition through the tool", () => {
     const sb = await sandbox("autonomy: autopilot\nbudgets:\n  missionTokens: 10\n");
     const dir = await newMission(sb);
     await plan(sb);
-    await writeFile(join(dir, "usage.jsonl"), `${JSON.stringify({ at: CLOCK, agent: "main", kind: "main", input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 50, cost: 0 })}\n`);
+    await writeFile(join(dir, "usage.jsonl"), usageLine("main", 50, { kind: "main" }));
     const result = await call(sb, "flight", { action: "transition", itemId: "T-001", event: "start" });
     expect(result).toMatchObject({ ok: false, text: expect.stringContaining("budget") });
   });
@@ -450,13 +450,23 @@ describe("get, steering, artifacts, pogo", () => {
     expect(scopes.every(r => r.ok)).toBe(true);
     expect((await call(sb, "main", { action: "get", scope: "item", itemId: "T-001" })).data).toMatchObject({ id: "T-001" });
     expect((await call(sb, "main", { action: "get", scope: "item", itemId: "T-404" })).ok).toBe(false);
-    const record = { at: CLOCK, mission: "M-001", pogoLoop: 0, agent: "pogo", kind: "sub", input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 9, cost: 0 };
-    await writeFile(join(dir, "usage.jsonl"), `${JSON.stringify(record)}\n`);
+    await writeFile(join(dir, "usage.jsonl"), usageLine("pogo", 9, { mission: "M-001", pogoLoop: 0, cacheRead: 4_000_000 }));
     const budget = await call(sb, "flight", { action: "get", scope: "budget" });
     expect(budget.text).toContain("budget_exceeded");
+    expect(budget.text).toContain("cache reads excluded");
     expect(budget.data).toMatchObject({ budget_exceeded: "pogo", pogoUsed: 9 });
     await call(sb, "houston", { action: "reset_pogo_loop" });
     expect((await call(sb, "flight", { action: "get", scope: "budget" })).data).toMatchObject({ pogoLoop: 1, pogoUsed: 0, budget_exceeded: undefined });
+  });
+
+  test("the budget view reports cache reads separately and never counts them", async () => {
+    const sb = await sandbox("budgets:\n  missionTokens: 100\n  pogoLoopTokens: 100\n");
+    const dir = await newMission(sb);
+    await writeFile(join(dir, "usage.jsonl"), usageLine("main", 40, { kind: "main", cacheRead: 7_000_000 }));
+    const view = await call(sb, "main", { action: "get", scope: "budget" });
+    expect(view.text).toContain("40 billable tokens (cache reads excluded");
+    expect(view.text).toContain("7000000");
+    expect(view.data).toMatchObject({ missionUsed: 40, missionExceeded: false, cacheReads: 7_000_000 });
   });
 
   test("steer then apply_steering delivers interrupt first and empties the queue", async () => {

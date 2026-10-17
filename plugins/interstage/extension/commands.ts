@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { lookup, type Setting } from "@oh-my-pi/pi-coding-agent/config/registry";
 import { activate, createSettingsPort, projectRoot, type Runtime } from "./activation";
-import { checkBudgets } from "./budget";
+import { checkBudgets, sumCacheReads } from "./budget";
 import { DEFAULT_CONFIG } from "./config";
 import { ENV_MISSION_ID, ENV_STATE_DIR, type ItemState } from "./contracts";
 import { listMissionIds, loadApprovals, loadEffectiveConfig, loadItems, loadMission, loadUsage, missionDirOf, saveMission, userConfigPath, withMissionLock } from "./state";
@@ -162,7 +162,8 @@ export async function runStatus(c: CommandEnv): Promise<void> {
   }
   const items = await loadItems(dir);
   const { config } = await loadEffectiveConfig(stateDir, c.env);
-  const budget = checkBudgets(await loadUsage(join(dir, "usage.jsonl")), config.budgets, mission.pogoLoop);
+  const usage = await loadUsage(join(dir, "usage.jsonl"));
+  const budget = checkBudgets(usage, config.budgets, mission.pogoLoop);
   const approvals = await loadApprovals(dir);
   const counts: Partial<Record<ItemState, number>> = {};
   for (const item of items) counts[item.state] = (counts[item.state] ?? 0) + 1;
@@ -173,7 +174,7 @@ export async function runStatus(c: CommandEnv): Promise<void> {
     `Branch: ${mission.branch} (base ${mission.baseBranch} @ ${mission.baseSha.slice(0, 9)})`,
     `Items: ${items.length === 0 ? "none planned yet" : states}`,
     ...items.map(item => `  ${item.id} [${item.state}] ${item.title}${item.failures > 0 ? ` (failures ${item.failures})` : ""}`),
-    `Budget: mission ${budget.missionUsed} of ${config.budgets.missionTokens} tokens; Pogo loop ${mission.pogoLoop} ${budget.pogoUsed} of ${config.budgets.pogoLoopTokens}`,
+    `Budget (billable tokens, cache reads excluded): mission ${budget.missionUsed} of ${config.budgets.missionTokens}; Pogo loop ${mission.pogoLoop} ${budget.pogoUsed} of ${config.budgets.pogoLoopTokens}; cache reads (not counted) ${sumCacheReads(usage)}`,
     `Breaker: ${mission.breaker.consecutiveFailures} of ${config.breaker.consecutiveFailures} consecutive failures`,
   ];
   const pending = approvals.filter(a => a.status === "pending");

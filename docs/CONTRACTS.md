@@ -148,7 +148,7 @@ One extension-registered tool named `mission`. Visible to the main session (CAPC
 
 ## 7. Usage records
 
-`message_end` handler in every session (main and children) appends to `missions/<id>/usage.jsonl` (or `usage.jsonl` with no mission) one `UsageRecord`: `{ at, mission?, pogoLoop?, agent, kind, input, output, cacheRead, cacheWrite, totalTokens, cost }` from `message.usage`, with `pogoLoop` copied from the active mission record. Budgets sum `totalTokens` over the mission file; the Pogo loop budget sums records whose `agent` is `pogo` and whose `pogoLoop` equals the mission's current `pogoLoop`. Houston starts a new Pogo loop with `reset_pogo_loop`.
+`message_end` handler in every session (main and children) appends to `missions/<id>/usage.jsonl` (or `usage.jsonl` with no mission) one `UsageRecord`: `{ at, mission?, pogoLoop?, agent, kind, input, output, cacheRead, cacheWrite, totalTokens, cost }` from `message.usage`, with `pogoLoop` copied from the active mission record. Budgets count `input + output + cacheWrite` per record and exclude `cacheRead`: every turn re-reads the whole conversation from the cache, so counting cache reads makes a budget measure conversation length squared instead of work done (observed: one standard-lane planning phase recorded about 1.8M tokens for Houston alone with cache reads included). `totalTokens` and `cacheRead` stay in the record for reporting. The mission budget sums that over the mission file; the Pogo loop budget sums records whose `agent` is `pogo` and whose `pogoLoop` equals the mission's current `pogoLoop`. Houston starts a new Pogo loop with `reset_pogo_loop`.
 
 ## 8. Config (`interstage.yml`)
 
