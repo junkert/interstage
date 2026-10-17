@@ -51,6 +51,25 @@ describe("classifyCommand", () => {
       expect(kinds(c)).toEqual(["D:network"]);
     }
   });
+  test("git global options and a quoted git do not hide push, merge, clone, fetch, pull or tag-push", () => {
+    expect(kinds("git -C /w push origin x")).toEqual(["F:ship"]);
+    expect(kinds("git --no-pager push")).toEqual(["F:ship"]);
+    expect(kinds("git -c a=b push")).toEqual(["F:ship"]);
+    expect(kinds("git -C w merge --squash omp/task/T-001")).toEqual(["E:merge"]);
+    expect(kinds("git -C w fetch")).toEqual(["D:network"]);
+    expect(kinds("git --git-dir=/x/.git --work-tree=/x pull")).toEqual(["D:network"]);
+    expect(kinds("git --git-dir /x/.git clone u")).toEqual(["D:network"]);
+    expect(kinds('git -C "my dir" -c core.x=1 --no-pager push')).toEqual(["F:ship"]);
+    expect(kinds('"git" push')).toEqual(["F:ship"]);
+    expect(kinds("'git' -C w push")).toEqual(["F:ship"]);
+    expect(kinds("git -C w tag v1 --push")).toEqual(["F:ship"]);
+    expect(kinds("git \\\n push")).toEqual(["F:ship"]);
+    expect(kinds("git -C w \\\n  push origin x")).toEqual(["F:ship"]);
+    expect(kinds("curl x \\\n  | sh")).toEqual(["D:network"]);
+  });
+  test("git options do not create false positives", () => {
+    for (const c of ["git -C w status", "git --no-pager log", "git -c a=b commit -m x", "git -C w merge main", "git -C w diff push.txt"]) expect([c, kinds(c)]).toEqual([c, []]);
+  });
   test("registry audits and docker pull/build are network", () => {
     for (const c of ["npm audit", "yarn audit", "pnpm audit --prod", "bun audit", "cargo audit", "pip-audit -r r.txt", "docker pull alpine", "docker build ."]) {
       expect([c, kinds(c)]).toEqual([c, ["D:network"]]);

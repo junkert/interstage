@@ -55,6 +55,8 @@ export function applyActiveOverrides(settings: SettingsPort): string[] {
   guarded(errors, "task.disabledAgents", () => settings.clearOverride("task.disabledAgents"));
   guarded(errors, "task.maxRecursionDepth", () => {
     const current = settings.get("task.maxRecursionDepth");
+    // A negative depth means unlimited in OMP: raising it to 3 would lower it, so leave it alone.
+    if (typeof current === "number" && current < 0) return;
     settings.override("task.maxRecursionDepth", Math.max(typeof current === "number" ? current : 0, 3));
   });
   for (const [id, value] of [
@@ -141,7 +143,31 @@ export async function activate(deps: ActivationDeps): Promise<void> {
   }
 }
 
-/** `session_start` in the main session: the flag turns Interstage on, its absence hides the agents. */
+export interface SessionStartDeps extends ActivationDeps {
+  flag: boolean;
+}
+
+/**
+ * Main-session start: the flag turns Interstage on, its absence hides the agents. A failure while activating is
+ * shown to the user as an error (the session would otherwise silently be plain OMP) and the agents stay hidden.
+ */
+export async function onSessionStart(deps: SessionStartDeps): Promise<void> {
+  try {
+    if (deps.flag) {
+      await activate(deps);
+      return;
+    }
+    const errors = applyInactiveOverrides(deps.settings);
+    if (errors.length > 0) deps.notify(`Interstage could not hide its agents: ${errors.join("; ")}`, "warning");
+  } catch (error) {
+    deps.runtime.active = false;
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error("[interstage] session_start failed:", error);
+    deps.notify(`Interstage could not start: ${reason}. Interstage is not active in this session; this is plain OMP.`, "error");
+    if (deps.flag) applyInactiveOverrides(deps.settings);
+  }
+}
+
 export function registerActivation(pi: ExtensionAPI, runtime: Runtime): void {
   pi.registerFlag(FLAG_NAME, {
     description: "Run this session as Interstage: CAPCOM talks to you and delegates to the specialist agents",
@@ -150,16 +176,14 @@ export function registerActivation(pi: ExtensionAPI, runtime: Runtime): void {
   });
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.agent.kind !== "main") return;
-    try {
-      const settings = createSettingsPort(pi);
-      if (pi.getFlag(FLAG_NAME) === true) {
-        await activate({ exec: (command, args, options) => pi.exec(command, args, { cwd: options.cwd }), notify: ctx.ui.notify.bind(ctx.ui), cwd: ctx.cwd, env: process.env, settings, runtime });
-        return;
-      }
-      const errors = applyInactiveOverrides(settings);
-      if (errors.length > 0) ctx.ui.notify(`Interstage could not hide its agents: ${errors.join("; ")}`, "warning");
-    } catch (error) {
-      console.error("[interstage] session_start failed:", error);
-    }
+    await onSessionStart({
+      flag: pi.getFlag(FLAG_NAME) === true,
+      exec: (command, args, options) => pi.exec(command, args, { cwd: options.cwd }),
+      notify: ctx.ui.notify.bind(ctx.ui),
+      cwd: ctx.cwd,
+      env: process.env,
+      settings: createSettingsPort(pi),
+      runtime,
+    });
   });
 }

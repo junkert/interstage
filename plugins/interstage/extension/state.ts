@@ -1,7 +1,7 @@
 // Mission state: the pure item state machine (`applyEvent`) and the file I/O under $INTERSTAGE_STATE_DIR.
 // Everything that touches the disk is below the "File I/O" marker.
 
-import { appendFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, link, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { decideGate, hasApproval } from "./gates";
@@ -332,30 +332,63 @@ export async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+async function lockToken(path: string): Promise<string | undefined> {
+  return readFile(path, "utf8").catch(() => undefined);
+}
+
 /**
- * Serialize read-modify-write cycles on one mission across sessions in this process and other processes:
- * the lock is a directory created with `mkdir`, which is atomic. A lock older than `staleMs` is taken over.
+ * Serialize read-modify-write cycles on one mission across sessions in this process and other processes.
+ *
+ * The lock is a file `.lock` holding an owner token. It is created by hard-linking a private temp file that already
+ * contains the token (`link` is atomic and fails with EEXIST), so the lock never exists without its token.
+ * A lock whose mtime is older than `staleMs` may be taken over, but only by the holder of the `.lock.takeover`
+ * mutex, and only after re-checking inside the mutex that the lock still has the stale token that was observed; two
+ * waiters that time out together therefore cannot both enter. The holder removes the lock in `finally` only while its
+ * own token is still there, so a slow holder never deletes its successor's lock.
  */
 export async function withMissionLock<T>(missionDir: string, fn: () => Promise<T>, staleMs = 15_000): Promise<T> {
   const lock = join(missionDir, ".lock");
-  const deadline = Date.now() + staleMs;
-  for (;;) {
-    try {
-      await mkdir(lock);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (Date.now() > deadline) {
-        await rm(lock, { recursive: true, force: true });
-        continue;
+  const mutex = `${lock}.takeover`;
+  const token = crypto.randomUUID();
+  const mine = `${lock}.${token}.tmp`;
+  await mkdir(missionDir, { recursive: true });
+  await writeFile(mine, token);
+  try {
+    for (;;) {
+      try {
+        await link(mine, lock);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      const age = await stat(lock).then(info => Date.now() - info.mtimeMs, () => undefined);
+      if (age === undefined) continue; // released in the meantime
+      if (age > staleMs) {
+        const observed = await lockToken(lock);
+        if (await mkdir(mutex).then(() => true, () => false)) {
+          try {
+            const still = await stat(lock).then(info => Date.now() - info.mtimeMs > staleMs, () => false);
+            if (still && (await lockToken(lock)) === observed) {
+              await rename(mine, lock);
+              break;
+            }
+          } finally {
+            await rm(mutex, { recursive: true, force: true });
+          }
+          continue;
+        }
+        const mutexAge = await stat(mutex).then(info => Date.now() - info.mtimeMs, () => 0);
+        if (mutexAge > staleMs) await rm(mutex, { recursive: true, force: true });
       }
       await Bun.sleep(5 + Math.random() * 15);
     }
-  }
-  try {
-    return await fn();
+    try {
+      return await fn();
+    } finally {
+      if ((await lockToken(lock)) === token) await rm(lock, { force: true });
+    }
   } finally {
-    await rm(lock, { recursive: true, force: true });
+    await rm(mine, { force: true });
   }
 }
 
@@ -442,7 +475,8 @@ export async function allocateMission(stateDir: string): Promise<{ id: string; d
 export async function findActiveMission(stateDir: string): Promise<string | undefined> {
   const ids = await listMissionIds(stateDir);
   for (const id of ids.reverse()) {
-    const mission = await loadMission(missionDirOf(stateDir, id));
+    // An unreadable or corrupt mission.json must not stop activation: skip it (doctor reports it).
+    const mission = await loadMission(missionDirOf(stateDir, id)).catch(() => undefined);
     if (mission !== undefined && mission.status !== "complete" && mission.status !== "aborted") return id;
   }
   return undefined;

@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { activate, applyActiveOverrides, applyInactiveOverrides, createRuntime, loadPersona, personaPath, type SettingsPort } from "../../plugins/interstage/extension/activation";
+import { activate, onSessionStart, applyActiveOverrides, applyInactiveOverrides, createRuntime, loadPersona, personaPath, type SettingsPort } from "../../plugins/interstage/extension/activation";
 import { AGENT_NAMES } from "../../plugins/interstage/extension/contracts";
 import { realExec, fakeUi, mission, sandbox, tempDir } from "./support";
 import { saveMission } from "../../plugins/interstage/extension/state";
@@ -41,6 +41,13 @@ describe("runtime overrides when active", () => {
       applyActiveOverrides(port);
       expect(overrides["task.maxRecursionDepth"]).toBe(expected);
     }
+  });
+
+  test("a negative (unlimited) recursion depth is left unchanged", () => {
+    const { port, overrides } = fakeSettings({ "task.maxRecursionDepth": -1 });
+    applyActiveOverrides(port);
+    expect("task.maxRecursionDepth" in overrides).toBe(false);
+    expect(port.get("task.maxRecursionDepth")).toBe(-1);
   });
 
   test("a previous hide-the-agents override is cleared", () => {
@@ -147,5 +154,65 @@ describe("activate", () => {
     expect(runtime.active).toBe(true);
     expect(ui.notes.filter(n => n.type === "error")).toHaveLength(1);
     expect(ui.notes[0]?.message).toContain("nope.md");
+  });
+});
+
+describe("activation failures and corrupt missions", () => {
+  test("a corrupt mission.json is skipped and the older unfinished mission is resumed", async () => {
+    const sb = await sandbox();
+    const good = join(sb.stateDir, "missions", "M-001");
+    await mkdir(good, { recursive: true });
+    await saveMission(good, mission({ id: "M-001", status: "paused" }));
+    const bad = join(sb.stateDir, "missions", "M-002");
+    await mkdir(bad, { recursive: true });
+    await writeFile(join(bad, "mission.json"), "{not json");
+    const env: NodeJS.ProcessEnv = { ...sb.env, INTERSTAGE_PERSONA_FILE: join(sb.repo, "README.md") };
+    const runtime = createRuntime();
+    await activate({ exec: realExec, notify: fakeUi().notify, cwd: sb.repo, env, settings: fakeSettings().port, runtime });
+    expect(runtime.active).toBe(true);
+    expect(env.INTERSTAGE_MISSION_ID).toBe("M-001");
+  });
+
+  test("a corrupt mission.json alone does not stop activation", async () => {
+    const sb = await sandbox();
+    const bad = join(sb.stateDir, "missions", "M-001");
+    await mkdir(bad, { recursive: true });
+    await writeFile(join(bad, "mission.json"), "garbage");
+    const ui = fakeUi();
+    const env: NodeJS.ProcessEnv = { ...sb.env, INTERSTAGE_PERSONA_FILE: join(sb.repo, "README.md") };
+    const runtime = createRuntime();
+    await onSessionStart({ flag: true, exec: realExec, notify: ui.notify, cwd: sb.repo, env, settings: fakeSettings().port, runtime });
+    expect(runtime.active).toBe(true);
+    expect(env.INTERSTAGE_MISSION_ID).toBeUndefined();
+    expect(ui.notes.filter(n => n.type === "error")).toEqual([]);
+  });
+
+  test("when activation throws, the user gets an error saying Interstage is not active and the agents stay hidden", async () => {
+    const sb = await sandbox();
+    const blocker = join(sb.agentDir, "a-file");
+    await writeFile(blocker, "x");
+    const ui = fakeUi();
+    const { port, overrides } = fakeSettings();
+    const runtime = createRuntime();
+    const spy = spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const env: NodeJS.ProcessEnv = { INTERSTAGE_STATE_DIR: join(blocker, "state") };
+      await onSessionStart({ flag: true, exec: realExec, notify: ui.notify, cwd: sb.repo, env, settings: port, runtime });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(runtime.active).toBe(false);
+    expect(ui.notes).toHaveLength(1);
+    expect(ui.notes[0]).toMatchObject({ type: "error", message: expect.stringContaining("not active") });
+    expect(overrides["task.disabledAgents"]).toEqual([...AGENT_NAMES]);
+  });
+
+  test("without the flag the agents are hidden and nothing is announced", async () => {
+    const sb = await sandbox();
+    const ui = fakeUi();
+    const { port, overrides } = fakeSettings();
+    await onSessionStart({ flag: false, exec: realExec, notify: ui.notify, cwd: sb.repo, env: {}, settings: port, runtime: createRuntime() });
+    expect(overrides["task.disabledAgents"]).toEqual([...AGENT_NAMES]);
+    expect(ui.notes).toEqual([]);
   });
 });

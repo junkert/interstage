@@ -165,6 +165,19 @@ describe("/interstage:abort", () => {
     expect(JSON.parse(await readFile(join(dir, "mission.json"), "utf8"))).toMatchObject({ status: "aborted" });
   });
 
+  test("also deletes numbered retry branches of the mission's items, and lists them in the confirmation", async () => {
+    const sb = await sandbox();
+    await started(sb);
+    for (const name of ["omp/task/T-001-2", "omp/task/T-001-3", "omp/task/T-002-2", "omp/task/T-0011", "omp/task/T-001-x", "omp/task/T-999-2"]) await git(sb.repo, "branch", name);
+    const ui = fakeUi({ confirm: true });
+    const c = envFor(sb, ui);
+    c.env.INTERSTAGE_MISSION_ID = "M-001";
+    await runAbort(c);
+    for (const name of ["omp/task/T-001", "omp/task/T-001-2", "omp/task/T-001-3", "omp/task/T-002-2"]) expect(ui.confirms[0]?.message).toContain(name);
+    const left = (await git(sb.repo, "branch", "--format=%(refname:short)")).split("\n").sort();
+    expect(left).toEqual(["main", "omp/task/T-0011", "omp/task/T-001-x", "omp/task/T-999", "omp/task/T-999-2"].sort());
+  });
+
   test("declining changes nothing", async () => {
     const sb = await sandbox();
     const dir = await started(sb);

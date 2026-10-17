@@ -27,12 +27,19 @@ const TOOL = "mission";
 /** CAPCOM may not change the project: these tools are blocked for the main session while Interstage is active. */
 const CAPCOM_BLOCKED_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: true, eval: true, debug: true };
 
+/**
+ * The one command CAPCOM may run: `bash|sh <path>/chunk-conversation.sh <args>`. The whole command must match and
+ * neither the path nor the arguments may contain shell metacharacters, so appended comments, `;`, `&&`, pipes,
+ * redirects, substitutions and newlines cannot smuggle a second command in.
+ */
+const CHUNKER_COMMAND = /^\s*(?:bash|sh)\s+[^\s;&|<>`$()#\\]*chunk-conversation\.sh(?:\s+[^;&|<>`$()#\\\r\n]*)?$/;
+
 function capcomLimit(event: { toolName: string; input: object }): { block: true; reason: string } | undefined {
   const handoff = "CAPCOM never changes the project itself: spawn houston with the request instead, or run plain omp without --interstage.";
   if (CAPCOM_BLOCKED_TOOLS[event.toolName]) return { block: true, reason: `${event.toolName} is blocked for CAPCOM. ${handoff}` };
   if (event.toolName !== "bash") return undefined;
   const command = "command" in event.input ? event.input.command : undefined;
-  if (typeof command === "string" && command.includes("chunk-conversation.sh")) return undefined;
+  if (typeof command === "string" && CHUNKER_COMMAND.test(command)) return undefined;
   return { block: true, reason: `bash is blocked for CAPCOM except the import chunker script. ${handoff}` };
 }
 

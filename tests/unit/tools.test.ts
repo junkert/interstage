@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ACTION_CALLERS, type MissionToolInput } from "../../plugins/interstage/extension/contracts";
-import { executeMission, parseMissionInput, registerMissionTool, type MissionDeps } from "../../plugins/interstage/extension/tools";
+import { executeMission, missionParameters, parseMissionInput, registerMissionTool, type MissionDeps } from "../../plugins/interstage/extension/tools";
 import { loadApprovals, loadItems, loadMission, saveItem } from "../../plugins/interstage/extension/state";
 import { CLOCK, BLOCKER, clock, git, realExec, sandbox, tempDir, type Sandbox } from "./support";
 
@@ -29,8 +29,8 @@ async function call(sb: Sandbox, caller: string, input: MissionToolInput) {
   return executeMission(depsFor(sb, caller), input);
 }
 
-async function newMission(sb: Sandbox) {
-  const result = await call(sb, "houston", { action: "create", title: "Add login", lane: "standard", brief: "Add a login page" });
+async function newMission(sb: Sandbox, lane: "fast" | "standard" | "full" = "standard") {
+  const result = await call(sb, "houston", { action: "create", title: "Add login", lane, brief: "Add a login page" });
   expect(result.ok).toBe(true);
   return join(sb.stateDir, "missions", sb.env.INTERSTAGE_MISSION_ID ?? "");
 }
@@ -97,15 +97,22 @@ describe("caller permissions", () => {
     await saveItem(dir, { ...(await loadItems(dir))[0]!, state: "blocked", failures: 3 });
     expect("input" in parseMissionInput({ action: "transition", itemId: "T-001", event: "unblock", note: "n" })).toBe(true);
     expect((await call(sb, "flight", { action: "transition", itemId: "T-001", event: "unblock" })).ok).toBe(false);
-    expect((await call(sb, "houston", { action: "transition", itemId: "T-001", event: "unblock", note: "user decided" })).ok).toBe(true);
+    expect((await call(sb, "flight", { action: "transition", itemId: "T-001", event: "unblock", note: "user decided" })).ok).toBe(true);
     expect((await loadItems(dir))[0]).toMatchObject({ state: "pending", failures: 0 });
   });
 
-  test("houston may also transition (fast lane); fido may not", async () => {
-    const sb = await sandbox();
-    await newMission(sb);
-    expect((await call(sb, "houston", { action: "transition", itemId: "T-404", event: "start" })).text).toContain("does not exist");
-    expect((await call(sb, "fido", { action: "transition", itemId: "T-404", event: "start" })).text).toContain("only flight, houston can");
+  test("houston may transition only in the fast lane; fido never", async () => {
+    const fast = await sandbox();
+    await newMission(fast, "fast");
+    expect((await call(fast, "houston", { action: "transition", itemId: "T-404", event: "start" })).text).toContain("does not exist");
+    expect((await call(fast, "fido", { action: "transition", itemId: "T-404", event: "start" })).text).toContain("only flight, houston can");
+    for (const lane of ["standard", "full"] as const) {
+      const sb = await sandbox();
+      await newMission(sb, lane);
+      const refused = await call(sb, "houston", { action: "transition", itemId: "T-404", event: "start" });
+      expect(refused).toMatchObject({ ok: false, text: expect.stringContaining("hand the work off to flight") });
+      expect((await call(sb, "flight", { action: "transition", itemId: "T-404", event: "start" })).text).toContain("does not exist");
+    }
   });
 
   test("approval requests are houston and flight; resolution is main only", async () => {
@@ -296,6 +303,43 @@ describe("plan_set", () => {
     }
   });
 
+  test("removes pending, failed, planning and blocked items that left the TODO, keeps the others and reports them", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    const extra = (id: string) => `\n## ${id}: Extra ${id}\ndepends: none\nspec: specs/a.md\ndone-when:\n- ok\n`;
+    const states = { "T-003": "pending", "T-004": "failed", "T-005": "planning", "T-006": "blocked", "T-007": "building", "T-008": "verifying", "T-009": "integrating", "T-010": "done" } as const;
+    await call(sb, "houston", { action: "write_artifact", kind: "todo", name: "", content: TODO + Object.keys(states).map(extra).join("") });
+    expect((await call(sb, "flight", { action: "plan_set" })).ok).toBe(true);
+    for (const [id, state] of Object.entries(states)) await saveItem(dir, { ...(await loadItems(dir)).find(i => i.id === id)!, state });
+    await call(sb, "houston", { action: "write_artifact", kind: "todo", name: "", content: TODO });
+    const result = await call(sb, "flight", { action: "plan_set" });
+    expect(result.ok).toBe(true);
+    expect((await loadItems(dir)).map(i => i.id)).toEqual(["T-001", "T-002", "T-007", "T-008", "T-009", "T-010"]);
+    expect(result.text).toContain("4 removed");
+    for (const id of ["T-007", "T-008", "T-009", "T-010"]) expect(result.text).toContain(`${id} (`);
+  });
+
+  test("refuses a plan that deletes an item an already started item depends on", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    await saveItem(dir, { ...(await loadItems(dir)).find(i => i.id === "T-002")!, state: "building" });
+    const replacement = "## T-003: Replacement\ndepends: none\nspec: specs/a.md\ndone-when:\n- ok\n";
+    await call(sb, "houston", { action: "write_artifact", kind: "todo", name: "", content: replacement });
+    const result = await call(sb, "flight", { action: "plan_set" });
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("T-002");
+    expect(result.text).toContain("still depends");
+    expect((await loadItems(dir)).map(i => i.id)).toEqual(["T-001", "T-002"]);
+  });
+
+  test("a planned item that depends on an id missing from the TODO is already rejected by validation", async () => {
+    const sb = await sandbox();
+    await newMission(sb);
+    await call(sb, "houston", { action: "write_artifact", kind: "todo", name: "", content: TODO.slice(TODO.indexOf("## T-002")) });
+    expect((await call(sb, "flight", { action: "plan_set" })).text).toContain("depends on unknown T-001");
+  });
+
   test("a todoPath outside the mission directory is rejected", async () => {
     const sb = await sandbox();
     await newMission(sb);
@@ -367,6 +411,24 @@ describe("transition through the tool", () => {
     expect(byFlight).toMatchObject({ ok: false, text: expect.stringContaining("only CAPCOM") });
     expect((await call(sb, "main", { action: "set_status", status: "running", reason: "human approved" })).ok).toBe(true);
     expect(await loadMission(dir)).toMatchObject({ status: "running", breaker: { consecutiveFailures: 0 } });
+  });
+
+  test("a halted mission cannot be moved by flight or houston through paused, running, complete or aborted", async () => {
+    const sb = await sandbox("autonomy: autopilot\nbreaker:\n  consecutiveFailures: 1\n");
+    const dir = await newMission(sb);
+    await plan(sb);
+    await call(sb, "flight", { action: "transition", itemId: "T-001", event: "start" });
+    await call(sb, "flight", { action: "transition", itemId: "T-001", event: "builder_failed" });
+    for (const caller of ["flight", "houston"]) {
+      for (const status of ["paused", "running", "complete"] as const) {
+        const result = await call(sb, caller, { action: "set_status", status, reason: "detour" });
+        expect([caller, status, result.ok]).toEqual([caller, status, false]);
+      }
+    }
+    expect((await loadMission(dir))?.status).toBe("halted");
+    expect((await call(sb, "flight", { action: "set_status", status: "halted", reason: "still halted" })).ok).toBe(true);
+    expect((await call(sb, "main", { action: "set_status", status: "paused", reason: "human" })).ok).toBe(true);
+    expect((await call(sb, "flight", { action: "set_status", status: "running", reason: "paused missions can be resumed" })).ok).toBe(true);
   });
 
   test("a mission over its token budget refuses start", async () => {
@@ -442,6 +504,25 @@ describe("get, steering, artifacts, pogo", () => {
     const sb = await sandbox();
     const result = await call(sb, "flight", { action: "get", scope: "mission" });
     expect(result).toMatchObject({ ok: false, text: expect.stringContaining("no active mission") });
+  });
+});
+
+describe("tool parameter schema with OMP's real zod", () => {
+  async function schema() {
+    const registry = Bun.fileURLToPath(import.meta.resolve("@oh-my-pi/pi-coding-agent/config/registry"));
+    const zod = await import(Bun.resolveSync("@oh-my-pi/omptype/zod", registry));
+    return missionParameters(zod as never) as unknown as { safeParse(input: unknown): { success: boolean } };
+  }
+
+  test("accepts every action and event (including unblock) and rejects unknown values", async () => {
+    const parameters = await schema();
+    for (const action of Object.keys(ACTION_CALLERS)) expect([action, parameters.safeParse({ action }).success]).toEqual([action, true]);
+    expect(parameters.safeParse({ action: "transition", itemId: "T-001", event: "unblock", note: "n" }).success).toBe(true);
+    expect(parameters.safeParse({ action: "explode" }).success).toBe(false);
+    expect(parameters.safeParse({ action: "transition", itemId: "T-001", event: "teleport" }).success).toBe(false);
+    expect(parameters.safeParse({ action: "get", scope: "everything" }).success).toBe(false);
+    expect(parameters.safeParse({ action: "steer", signal: "pause", payload: { a: 1 } }).success).toBe(true);
+    expect(parameters.safeParse({}).success).toBe(false);
   });
 });
 

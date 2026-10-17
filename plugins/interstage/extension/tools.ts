@@ -367,10 +367,21 @@ async function planSet(deps: MissionDeps, active: Active, todoPath: string | und
       }
     }
     const existing = new Map((await loadItems(dir)).map(item => [item.id, item]));
+    const planned = parseTodo(text).items;
+    const plannedIds = new Set(planned.map(parsed => parsed.id));
+    const removed = [...existing.values()].filter(old => !plannedIds.has(old.id) && REFRESHABLE[old.state]);
+    const kept = [...existing.values()].filter(old => !plannedIds.has(old.id) && !REFRESHABLE[old.state]);
+    // Items that stay as they are must not be left depending on an item this plan deletes. (Planned items are
+    // already covered: validateTodo rejects a dependency that is not in the TODO.)
+    const removedIds = new Set(removed.map(old => old.id));
+    const orphaned = [...kept, ...planned.map(parsed => existing.get(parsed.id)).filter((old): old is ItemRecord => old !== undefined && !REFRESHABLE[old.state])].filter(old => old.depends.some(dep => removedIds.has(dep)));
+    if (orphaned.length > 0) {
+      return err(`The plan would remove ${[...removedIds].join(", ")}, but ${orphaned.map(old => old.id).join(", ")} (already started or done) still depends on it; keep the item in the TODO.`);
+    }
     let created = 0;
     let refreshed = 0;
-    const skipped: string[] = [];
-    for (const parsed of parseTodo(text).items) {
+    const skipped: string[] = kept.map(old => `${old.id} (${old.state}, not in the TODO)`);
+    for (const parsed of planned) {
       const old = existing.get(parsed.id);
       if (old !== undefined && !REFRESHABLE[old.state]) {
         skipped.push(`${old.id} (${old.state})`);
@@ -385,8 +396,10 @@ async function planSet(deps: MissionDeps, active: Active, todoPath: string | und
       if (old === undefined) created += 1;
       else refreshed += 1;
     }
+    for (const old of removed) await rm(join(dir, "items", `${old.id}.json`));
     const skippedText = skipped.length === 0 ? "" : ` Skipped in-flight or done items: ${skipped.join(", ")}.`;
-    return ok(`Plan ${ref} applied: ${created} created, ${refreshed} refreshed.${skippedText}`, { revision: ref, created, refreshed, skipped }, "request approval A with ref plan if required, then start the first ready item");
+    const removedText = removed.length === 0 ? "" : ` Removed: ${removed.map(old => `${old.id} (${old.state})`).join(", ")}.`;
+    return ok(`Plan ${ref} applied: ${created} created, ${refreshed} refreshed, ${removed.length} removed.${removedText}${skippedText}`, { revision: ref, created, refreshed, removed: removed.map(old => old.id), skipped }, "request approval A with ref plan if required, then start the first ready item");
   });
 }
 
@@ -442,6 +455,9 @@ async function transition(deps: MissionDeps, active: Active, input: Extract<Miss
   const { config } = await loadEffectiveConfig(stateDir, deps.env);
   return withMissionLock(dir, async () => {
     const mission = (await loadMission(dir)) ?? active.mission;
+    if (deps.caller === "houston" && mission.lane !== "fast") {
+      return err(`Mission ${mission.id} runs in the ${mission.lane} lane, where flight drives the items; hand the work off to flight instead of calling transition.`);
+    }
     const items = await loadItems(dir);
     const approvals = await loadApprovals(dir);
     const budget = checkBudgets(await loadUsage(join(dir, "usage.jsonl")), config.budgets, mission.pogoLoop);
@@ -497,8 +513,9 @@ async function setStatus(deps: MissionDeps, active: Active, status: "paused" | "
   return withMissionLock(active.dir, async () => {
     const mission = (await loadMission(active.dir)) ?? active.mission;
     if (mission.status === "complete" || mission.status === "aborted") return err(`Mission ${mission.id} is ${mission.status} and cannot change.`);
-    if (mission.status === "halted" && status === "running" && deps.caller !== "main") {
-      return err(`Mission ${mission.id} was halted (${mission.statusReason ?? "no reason recorded"}); only CAPCOM can resume it.`);
+    // Gate G: once halted, only CAPCOM may move the mission anywhere else (no halted -> paused -> running detour).
+    if (mission.status === "halted" && status !== "halted" && deps.caller !== "main") {
+      return err(`Mission ${mission.id} was halted (${mission.statusReason ?? "no reason recorded"}); only CAPCOM can change its status.`);
     }
     const resumed = mission.status === "halted" && status === "running";
     const next: MissionRecord = { ...mission, status, statusReason: reason, breaker: resumed ? { consecutiveFailures: 0 } : mission.breaker };
@@ -509,8 +526,8 @@ async function setStatus(deps: MissionDeps, active: Active, status: "paused" | "
 
 // -- registration -----------------------------------------------------------------------------------------------
 
-export function registerMissionTool(pi: ExtensionAPI): void {
-  const z = pi.zod;
+/** Parameter schema of the `mission` tool, built with OMP's zod (`pi.zod`). */
+export function missionParameters(z: ExtensionAPI["zod"]) {
   const finding = z.object({
     severity: z.enum(["blocker", "major", "minor", "nit"]),
     title: z.string(),
@@ -518,6 +535,34 @@ export function registerMissionTool(pi: ExtensionAPI): void {
     location: z.string().optional(),
   });
   const strings = z.array(z.string());
+  return z.object({
+    action: z.enum(ACTIONS as [MissionToolInput["action"], ...MissionToolInput["action"][]]),
+    title: z.string().optional(),
+    lane: z.enum(["fast", "standard", "full"]).optional(),
+    brief: z.string().optional(),
+    todoPath: z.string().optional(),
+    scope: z.enum(["mission", "items", "item", "approvals", "budget"]).optional(),
+    itemId: z.string().optional(),
+    event: z.enum(Object.keys(EVENTS) as [ItemEvent, ...ItemEvent[]]).optional(),
+    findings: z.array(finding).optional(),
+    commit: z.string().optional(),
+    note: z.string().optional(),
+    op: z.enum(["request", "resolve"]).optional(),
+    gate: z.enum(["A", "B", "C", "D", "E", "F", "G"]).optional(),
+    ref: z.string().optional(),
+    status: z.string().optional().describe("approval resolve: granted|denied; set_status: paused|running|complete|halted"),
+    signal: z.enum(Object.keys(SIGNALS) as [SteeringSignal, ...SteeringSignal[]]).optional(),
+    payload: z.record(z.string(), z.unknown()).optional(),
+    instructions: z.object({ primary: z.string(), constraints: strings, success_criteria: strings, next_steps: strings }).optional(),
+    kind: z.enum(Object.keys(KINDS) as [ArtifactKind, ...ArtifactKind[]]).optional(),
+    name: z.string().optional(),
+    content: z.string().optional(),
+    append: z.boolean().optional(),
+    reason: z.string().optional(),
+  });
+}
+
+export function registerMissionTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "mission",
     label: "Mission",
@@ -525,31 +570,7 @@ export function registerMissionTool(pi: ExtensionAPI): void {
       "Interstage mission state. Actions: create (title, lane, brief); plan_set (todoPath?); get (scope: mission|items|item|approvals|budget, itemId?); " +
       "transition (itemId, event, findings?, commit?, note?); approval (op: request|resolve, gate, ref, status?, note?); steer (signal, payload, instructions?); " +
       "apply_steering; write_artifact (kind, name, content, append?); set_status (status, reason); reset_pogo_loop. Which agent may call which action is enforced.",
-    parameters: z.object({
-      action: z.enum(ACTIONS as [MissionToolInput["action"], ...MissionToolInput["action"][]]),
-      title: z.string().optional(),
-      lane: z.enum(["fast", "standard", "full"]).optional(),
-      brief: z.string().optional(),
-      todoPath: z.string().optional(),
-      scope: z.enum(["mission", "items", "item", "approvals", "budget"]).optional(),
-      itemId: z.string().optional(),
-      event: z.enum(Object.keys(EVENTS) as [ItemEvent, ...ItemEvent[]]).optional(),
-      findings: z.array(finding).optional(),
-      commit: z.string().optional(),
-      note: z.string().optional(),
-      op: z.enum(["request", "resolve"]).optional(),
-      gate: z.enum(["A", "B", "C", "D", "E", "F", "G"]).optional(),
-      ref: z.string().optional(),
-      status: z.string().optional().describe("approval resolve: granted|denied; set_status: paused|running|complete|halted"),
-      signal: z.enum(Object.keys(SIGNALS) as [SteeringSignal, ...SteeringSignal[]]).optional(),
-      payload: z.record(z.string(), z.unknown()).optional(),
-      instructions: z.object({ primary: z.string(), constraints: strings, success_criteria: strings, next_steps: strings }).optional(),
-      kind: z.enum(Object.keys(KINDS) as [ArtifactKind, ...ArtifactKind[]]).optional(),
-      name: z.string().optional(),
-      content: z.string().optional(),
-      append: z.boolean().optional(),
-      reason: z.string().optional(),
-    }),
+    parameters: missionParameters(pi.zod),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const parsed = parseMissionInput(params as Record<string, unknown>);
       const result: MissionToolResult =

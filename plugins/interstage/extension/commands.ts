@@ -205,7 +205,8 @@ export async function runAbort(c: CommandEnv): Promise<void> {
   const items = await loadItems(dir);
   const listed = await git("branch", "--list", "--format=%(refname:short)", "omp/task/*");
   const existing = new Set(listed.stdout.split("\n").map(line => line.trim()).filter(Boolean));
-  const taskBranches = items.map(item => `omp/task/${item.id}`).filter(branch => existing.has(branch));
+  // OMP names retry branches omp/task/<ID>-2, -3: delete the base branch and every numbered retry of this mission's items.
+  const taskBranches = [...existing].filter(branch => items.some(item => branch === `omp/task/${item.id}` || new RegExp(`^omp/task/${item.id}-\\d+$`).test(branch)));
   const confirmed = await c.ui.confirm(
     `Abort mission ${id}?`,
     `This checks out ${mission.baseBranch} and permanently deletes the branch ${mission.branch}${taskBranches.length > 0 ? ` and ${taskBranches.join(", ")}` : ""}, including any commits on them.`,

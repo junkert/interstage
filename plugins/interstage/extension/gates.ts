@@ -29,21 +29,29 @@ const INSTALL: RegExp[] = [
   /\bbrew\s+install\b/,
   /\bapt(-get)?\s+install\b/,
 ];
+/**
+ * `git` as the start of a command: optionally quoted, followed by any global options (`-C <dir>`, `-c k=v`,
+ * `--no-pager`, `--git-dir=...`, `--work-tree <dir>`, ...), so `git -C w push` classifies like `git push`.
+ */
+const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
+const GIT = String.raw`\bgit["']?(?:\s+(?:-[Cc]\s+${ARG}|--(?:git-dir|work-tree|namespace|exec-path)\s+${ARG}|--[\w-]+(?:=${ARG})?|-[pP]))*`;
+const git = (rest: string): RegExp => new RegExp(GIT + String.raw`\s+` + rest);
+
 const NETWORK: RegExp[] = [
   /\b(curl|wget)\b/,
-  /\bgit\s+(clone|fetch|pull)\b/,
+  git(String.raw`(?:clone|fetch|pull)\b`),
   /\bgh\s+api\b/,
   /\b(npm|yarn|pnpm|bun|cargo)\s+audit\b/,
   /\bpip-audit\b/,
   /\bdocker\s+(pull|build)\b/,
 ];
-const MERGE: RegExp[] = [/\bgit\s+merge\b.*\bomp\/task\//];
+const MERGE: RegExp[] = [git(String.raw`merge\b.*\bomp\/task\/`)];
 const SHIP: RegExp[] = [
-  /\bgit\s+push\b/,
+  git(String.raw`push\b`),
   /\bgh\s+(pr\s+create|release\s+create)\b/,
   /\bvercel\b/,
   /\bnpm\s+publish\b/,
-  /\bgit\s+tag\b.*\s-?-?(push)\b/,
+  git(String.raw`tag\b.*\s-?-?(push)\b`),
 ];
 
 const KINDS: { gate: "D" | "E" | "F"; kind: "install" | "network" | "merge" | "ship"; patterns: RegExp[] }[] = [
@@ -63,7 +71,8 @@ export function classifyCommand(
   command: string,
 ): { gate: "D" | "E" | "F"; kind: "install" | "network" | "merge" | "ship"; ref: string }[] {
   const out: { gate: "D" | "E" | "F"; kind: "install" | "network" | "merge" | "ship"; ref: string }[] = [];
-  for (const segment of command.split(/&&|\|\||;|\||\n/)) {
+  // A backslash-newline continuation is removed by the shell, so `git \\<newline> push` is `git  push`.
+  for (const segment of command.replace(/\\\r?\n/g, "").split(/&&|\|\||;|\||\n/)) {
     const ref = normalizeCommand(segment);
     if (ref === "") continue;
     for (const { gate, kind, patterns } of KINDS) {

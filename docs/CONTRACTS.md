@@ -117,11 +117,13 @@ Verification policy: `lsp` diagnostics count toward a clean verdict only when th
 Hook command classification (case-sensitive regexes, applied to each `bash` command string, including after `&&`, `||`, `;`, `|`):
 
 - install (D): `\b(npm|pnpm|yarn|bun)\s+(install|add|i)\b`, `\bpip3?\s+install\b`, `\bgo\s+(get|install)\b`, `\bcargo\s+(install|add)\b`, `\bgem\s+install\b`, `\bbrew\s+install\b`, `\bapt(-get)?\s+install\b`.
-- network (D): `\b(curl|wget)\b`, `\bgit\s+(clone|fetch|pull)\b`, `\bgh\s+api\b` (read-only `gh` subcommands are allowed).
+- network (D): `\b(curl|wget)\b`, `\bgit\s+(clone|fetch|pull)\b`, `\bgh\s+api\b` (read-only `gh` subcommands are allowed), dependency audits (`npm|yarn|pnpm|bun|cargo audit`, `pip-audit`) and `docker pull|build`, all of which contact registries.
 - merge (E): `\bgit\s+merge\b.*\bomp/task/`.
 - ship (F): `\bgit\s+push\b`, `\bgh\s+(pr\s+create|release\s+create)\b`, `\bvercel\b`, `\bnpm\s+publish\b`, `\bgit\s+tag\b.*\s-?-?(push)\b`.
 
-Gates D, E and F apply only to sessions whose `ctx.agent.kind === "sub"`; the main session (CAPCOM) is not blocked by hooks. The block reason is a single sentence that names the gate and tells the agent to report the need to its orchestrator as an open question.
+Git patterns above tolerate global options between `git` and the subcommand (`git -C <dir> push`, `git -c k=v push`, `git --no-pager push`) and a quoted `git`; a hook that misses these is a bypass of gates E and F.
+
+Gates D, E and F apply only to sessions whose `ctx.agent.kind === "sub"`. The main session (CAPCOM) is restricted differently while Interstage is active: `edit`, `write`, `ast_edit`, `eval` and `debug` are blocked, `bash` is blocked except for the import chunker script (an exact command, no shell metacharacters), and `task` may spawn only `houston`. The block reason is a single sentence that names the gate and tells the agent to report the need to its orchestrator as an open question.
 
 ## 5. The `mission` tool
 
@@ -130,7 +132,7 @@ One extension-registered tool named `mission`. Visible to the main session (CAPC
 | `action` | Parameters | Allowed callers | Effect |
 |---|---|---|---|
 | `create` | `title`, `lane`, `brief` | houston | Creates `missions/<id>/`, `mission.json`, the branch `mission/<id>-<slug>`; exports `INTERSTAGE_MISSION_ID` |
-| `plan_set` | `todoPath?` (default `missions/<id>/TODO.md`) | houston, flight | Parses and validates the TODO, creates `items/*.json` for new items, replaces items that have not started, and refreshes `title`, `depends`, `spec` and `done-when` of items in `pending`, `failed`, `planning` or `blocked` while keeping their counters and history. Items that are `building`, `verifying`, `integrating` or `done` are never changed. Requests gate B when required |
+| `plan_set` | `todoPath?` (default `missions/<id>/TODO.md`) | houston, flight | Parses and validates the TODO, creates `items/*.json` for new items, and refreshes `title`, `depends`, `spec` and `done-when` of items in `pending`, `failed`, `planning` or `blocked` while keeping their counters and history. An existing item that is no longer in the TODO is removed if it is in `pending`, `failed`, `planning` or `blocked`; if it is `building`, `verifying`, `integrating` or `done` it is kept and reported as skipped. Items that are `building`, `verifying`, `integrating` or `done` are never changed. Requests gate B when required |
 | `get` | `scope`: `mission` \| `items` \| `item` \| `approvals` \| `budget`; `itemId?` | main, houston, flight | Read state. `budget` returns used and remaining tokens and breaker state |
 | `transition` | `itemId`, `event`, `findings?`, `commit?`, `note?` | flight; houston (fast lane only, where Houston plays Flight) | Applies an event from section 3 and returns the new state and the recommended next action |
 | `approval` | `op`: `request` \| `resolve`; `gate`; `ref`; `status?` (`granted` \| `denied`); `note?` | request: houston, flight; resolve: main only | `request` applies `decideGate` first: `allow` stores a granted approval at once; `stop` returns an error; `approve` stores a pending one. Requesting a ref that was denied returns an error saying not to proceed and not to re-request. `resolve` records the user's answer |

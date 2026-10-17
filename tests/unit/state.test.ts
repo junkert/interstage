@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type ApplyInput,
@@ -357,6 +357,53 @@ describe("file helpers", () => {
     );
     expect((await loadMission(dir))?.nextSeq).toBe(26);
     expect(await readdir(dir)).not.toContain(".lock");
+  });
+
+  test("a stale lock (judged by its mtime) is taken over by exactly one waiter at a time", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, ".lock"), "dead-process");
+    const old = new Date(Date.now() - 3_600_000);
+    await utimes(join(dir, ".lock"), old, old);
+    let inside = 0;
+    let overlap = 0;
+    let entered = 0;
+    await Promise.all(
+      Array.from({ length: 12 }, () =>
+        withMissionLock(dir, async () => {
+          inside += 1;
+          overlap = Math.max(overlap, inside);
+          entered += 1;
+          await writeFile(join(dir, "probe"), String(entered));
+          await readFile(join(dir, "probe"), "utf8");
+          inside -= 1;
+        }),
+      ),
+    );
+    expect(entered).toBe(12);
+    expect(overlap).toBe(1);
+    expect((await readdir(dir)).sort()).toEqual(["probe"]);
+  });
+
+  test("a slow holder whose lock was taken over leaves its successor's lock in place", async () => {
+    const dir = await tempDir();
+    let finishSuccessor!: () => void;
+    const successorGate = new Promise<void>(resolve => (finishSuccessor = resolve));
+    let successorIn!: () => void;
+    const successorEntered = new Promise<void>(resolve => (successorIn = resolve));
+    let successor: Promise<void> = Promise.resolve();
+    await withMissionLock(dir, async () => {
+      const old = new Date(Date.now() - 3_600_000);
+      await utimes(join(dir, ".lock"), old, old);
+      successor = withMissionLock(dir, async () => {
+        successorIn();
+        await successorGate;
+      });
+      await successorEntered;
+    });
+    expect(await readFile(join(dir, ".lock"), "utf8")).not.toBe("");
+    finishSuccessor();
+    await successor;
+    expect(await readdir(dir)).toEqual([]);
   });
 
   test("items round trip and are listed in id order; missing files read as empty", async () => {
