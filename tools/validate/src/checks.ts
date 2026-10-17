@@ -83,6 +83,34 @@ export function checkMarketplace(root: string): Finding[] {
   return findings;
 }
 
+function checkSkillEntries(root: string, skills: unknown[], rel: string, seenPaths: Set<string>): Finding[] {
+  const findings: Finding[] = [];
+  const add = (rule: string, message: string) => findings.push({ rule, path: rel, message });
+  skills.forEach((skill: unknown, index: number) => {
+    const where = `skills[${index}]`;
+    if (!isDict(skill)) return add("manifest-skills", `${where} must be an object`);
+    if (typeof skill.name !== "string" || !/^is-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill.name)) {
+      add("manifest-skills", `${where}.name must start with \`is-\` and be lowercase kebab-case`);
+    }
+    if (typeof skill.path !== "string" || !isDir(root, skill.path)) {
+      add("manifest-skills", `${where}.path must be an existing directory`);
+    } else {
+      if (seenPaths.has(skill.path)) add("manifest-skills", `${where}.path \`${skill.path}\` is listed twice`);
+      seenPaths.add(skill.path);
+      if (skill.name !== skill.path.split("/").pop()) add("manifest-skills", `${where}.name must equal the last segment of its path`);
+    }
+    if (typeof skill.modified !== "boolean") add("manifest-skills", `${where}.modified must be a boolean`);
+    if (typeof skill.budgetBytes !== "number" || !Number.isInteger(skill.budgetBytes) || skill.budgetBytes <= 0) {
+      add("manifest-skills", `${where}.budgetBytes must be a positive integer (the SKILL.md size target)`);
+    }
+    if (skill.origin !== "upstream" && skill.origin !== "authored") add("manifest-skills", `${where}.origin must be \`upstream\` or \`authored\``);
+    if (skill.origin === "upstream" && !(Array.isArray(skill.from) && skill.from.length > 0 && skill.from.every((s: unknown) => typeof s === "string"))) {
+      add("manifest-skills", `${where}.from must list the upstream skill names it derives from`);
+    }
+  });
+  return findings;
+}
+
 /** `skills.manifest.json`: provenance and size budget of every vendored or authored skill. */
 export function checkSkillsManifest(root: string): Finding[] {
   const rel = "skills.manifest.json";
@@ -108,29 +136,35 @@ export function checkSkillsManifest(root: string): Finding[] {
     add("manifest-skills", "`skills` must be an array");
     return findings;
   }
+  findings.push(...checkSkillEntries(root, manifest.skills, rel, new Set<string>()));
+  return findings;
+}
+
+/** Per-batch manifest fragments, merged into `skills.manifest.json` once a batch is integrated. */
+const FRAGMENTS_DIR = "skills.manifest.fragments";
+
+function fragmentFiles(root: string): string[] {
+  if (!isDir(root, FRAGMENTS_DIR)) return [];
+  return readdirSync(join(root, FRAGMENTS_DIR))
+    .filter((file) => file.endsWith(".json"))
+    .sort();
+}
+
+/** Each fragment is a JSON array of skill entries with the same shape as `skills.manifest.json#skills`. */
+export function checkManifestFragments(root: string): Finding[] {
+  const findings: Finding[] = [];
   const seenPaths = new Set<string>();
-  manifest.skills.forEach((skill: unknown, index: number) => {
-    const where = `skills[${index}]`;
-    if (!isDict(skill)) return add("manifest-skills", `${where} must be an object`);
-    if (typeof skill.name !== "string" || !/^is-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill.name)) {
-      add("manifest-skills", `${where}.name must start with \`is-\` and be lowercase kebab-case`);
-    }
-    if (typeof skill.path !== "string" || !isDir(root, skill.path)) {
-      add("manifest-skills", `${where}.path must be an existing directory`);
+  for (const file of fragmentFiles(root)) {
+    const rel = `${FRAGMENTS_DIR}/${file}`;
+    const parsed = readJson(root, rel);
+    if ("error" in parsed) {
+      findings.push({ rule: "manifest-json", path: rel, message: `invalid JSON: ${parsed.error}` });
+    } else if (!Array.isArray(parsed.value)) {
+      findings.push({ rule: "manifest-shape", path: rel, message: "a fragment must be a JSON array of skill entries" });
     } else {
-      if (seenPaths.has(skill.path)) add("manifest-skills", `${where}.path \`${skill.path}\` is listed twice`);
-      seenPaths.add(skill.path);
-      if (skill.name !== skill.path.split("/").pop()) add("manifest-skills", `${where}.name must equal the last segment of its path`);
+      findings.push(...checkSkillEntries(root, parsed.value, rel, seenPaths));
     }
-    if (typeof skill.modified !== "boolean") add("manifest-skills", `${where}.modified must be a boolean`);
-    if (typeof skill.budgetBytes !== "number" || !Number.isInteger(skill.budgetBytes) || skill.budgetBytes <= 0) {
-      add("manifest-skills", `${where}.budgetBytes must be a positive integer (the SKILL.md size target)`);
-    }
-    if (skill.origin !== "upstream" && skill.origin !== "authored") add("manifest-skills", `${where}.origin must be \`upstream\` or \`authored\``);
-    if (skill.origin === "upstream" && !(Array.isArray(skill.from) && skill.from.length > 0 && skill.from.every((s: unknown) => typeof s === "string"))) {
-      add("manifest-skills", `${where}.from must list the upstream skill names it derives from`);
-    }
-  });
+  }
   return findings;
 }
 
@@ -169,12 +203,16 @@ function pluginContext(root: string): PluginContext {
     for (const plugin of readdirSync(join(root, "plugins"))) for (const skill of listSkillDirs(root, `plugins/${plugin}`)) knownSkills.add(skill);
   }
   const manifestSkills = new Map<string, { budgetBytes: number | undefined }>();
+  const entries: unknown[] = [];
   const manifest = existsSync(join(root, "skills.manifest.json")) ? readJson(root, "skills.manifest.json") : undefined;
-  if (manifest && "value" in manifest && isDict(manifest.value) && Array.isArray(manifest.value.skills)) {
-    for (const skill of manifest.value.skills) {
-      if (isDict(skill) && typeof skill.path === "string") {
-        manifestSkills.set(skill.path, { budgetBytes: typeof skill.budgetBytes === "number" ? skill.budgetBytes : undefined });
-      }
+  if (manifest && "value" in manifest && isDict(manifest.value) && Array.isArray(manifest.value.skills)) entries.push(...manifest.value.skills);
+  for (const file of fragmentFiles(root)) {
+    const fragment = readJson(root, `${FRAGMENTS_DIR}/${file}`);
+    if ("value" in fragment && Array.isArray(fragment.value)) entries.push(...fragment.value);
+  }
+  for (const skill of entries) {
+    if (isDict(skill) && typeof skill.path === "string") {
+      manifestSkills.set(skill.path, { budgetBytes: typeof skill.budgetBytes === "number" ? skill.budgetBytes : undefined });
     }
   }
   return { knownSkills, manifestSkills };
@@ -188,5 +226,5 @@ export function validateRepo(root: string, options: { plugin?: string } = {}): F
   const ctx = pluginContext(root);
   if (options.plugin !== undefined) return validatePlugin(root, options.plugin, ctx);
   const plugins = catalogPluginDirs(root).flatMap((dir) => validatePlugin(root, dir, ctx));
-  return [...checkMarketplace(root), ...checkSkillsManifest(root), ...checkNotices(root), ...plugins];
+  return [...checkMarketplace(root), ...checkSkillsManifest(root), ...checkManifestFragments(root), ...checkNotices(root), ...plugins];
 }

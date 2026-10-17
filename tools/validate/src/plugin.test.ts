@@ -148,3 +148,31 @@ describe("validateAgent", () => {
     expect(validateAgent("agents/main.md", "---\nname: main\ndescription: d\n---\n\nx\n", ctx).map((finding) => finding.rule)).toContain("agent-name");
   });
 });
+
+describe("manifest fragments", () => {
+  const entry = (name: string, extra: object = {}) => ({ name, path: `${PLUGIN}/skills/${name}`, origin: "authored", modified: false, budgetBytes: 1000, ...extra });
+
+  test("a skill listed only in a fragment counts as listed and gets its budget", () => {
+    skill("is-frag");
+    put("skills.manifest.fragments/S1.json", [entry("is-frag")]);
+    expect(rules()).toEqual([]);
+  });
+
+  test("fragments are validated like the manifest", () => {
+    skill("is-frag");
+    put("skills.manifest.fragments/S1.json", [entry("is-frag", { budgetBytes: undefined })]);
+    expect(rules().sort()).toEqual(["manifest-skills", "skill-budget"]);
+  });
+
+  test("the same path in two fragments is rejected", () => {
+    skill("is-frag");
+    put("skills.manifest.fragments/S1.json", [entry("is-frag")]);
+    put("skills.manifest.fragments/S2.json", [entry("is-frag")]);
+    expect(rules()).toEqual(["manifest-skills"]);
+  });
+
+  test("a fragment that is not an array is reported", () => {
+    put("skills.manifest.fragments/S1.json", { skills: [] });
+    expect(rules()).toEqual(["manifest-shape"]);
+  });
+});
