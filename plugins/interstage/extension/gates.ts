@@ -91,19 +91,15 @@ export function blockReason(gate: GateId, kind: string, ref: string): string {
   return `Gate ${gate} blocks this ${kind} command (${ref}): do not retry it, and report the need to your orchestrator as an open question.`;
 }
 
-/** First words Flight and Houston may run in bash (CONTRACTS section 4). `git` itself is limited by gates D, E and F. */
-const ORCHESTRATOR_COMMANDS: Record<string, true> = {
-  git: true, ls: true, cat: true, pwd: true, echo: true, head: true, tail: true, wc: true, test: true, true: true, grep: true, rg: true, cd: true,
-};
-
-const ORCHESTRATOR_HINT = "Flight and Houston delegate file changes and test runs to builders and verifiers, so their bash is limited to git and read-only inspection";
+const ORCHESTRATOR_HINT = "Flight and Houston delegate file changes to builders, so their bash may not write files with redirects, here-documents or tee";
 
 /**
- * Flight and Houston bash allowlist. Returns the block reason, or undefined when every simple command is allowed.
- * Quoted strings are removed before the checks (a `>` or `;` inside a commit message is fine), except that command
- * substitution is rejected even inside double quotes, because the shell still runs it there. An unterminated quote is
- * rejected. Also rejected: output redirection and here-documents (`>`, `>>`, `<<`) outside quotes, `<(...)`, the
- * word `tee`, and `rg --pre` (it runs a program).
+ * Flight and Houston bash guard. Returns the block reason, or undefined when the command is allowed. Any program may run
+ * (ssh, ping, test runners, inspection): the one thing refused is creating or overwriting files by shell redirection,
+ * here-document or `tee`, which is how an orchestrator once re-created product files itself instead of delegating.
+ * Quoted strings are removed before the check (a `>` or `;` inside a commit message is fine), except that command
+ * substitution is rejected inside double quotes, because the shell still runs it there and the redirect would be
+ * hidden. An unterminated quote is rejected. Redirects that only discard or merge streams (`2>&1`, `>/dev/null`) pass.
  */
 export function orchestratorBashProblem(command: string): string | undefined {
   const joined = command.replace(/\\\r?\n/g, "");
@@ -118,7 +114,7 @@ export function orchestratorBashProblem(command: string): string | undefined {
     if (quote === '"') {
       if (ch === "\\") i += 1;
       else if (ch === '"') quote = undefined;
-      else if (ch === "`" || (ch === "$" && joined[i + 1] === "(")) return `${ORCHESTRATOR_HINT} (command substitution is not allowed)`;
+      else if (ch === "`" || (ch === "$" && joined[i + 1] === "(")) return `${ORCHESTRATOR_HINT} (command substitution inside double quotes is not allowed)`;
       continue;
     }
     if (ch === "'" || ch === '"') {
@@ -132,15 +128,10 @@ export function orchestratorBashProblem(command: string): string | undefined {
     }
   }
   if (quote !== undefined) return `${ORCHESTRATOR_HINT} (unterminated quote)`;
-  if (/`|\$\(|<\(/.test(bare)) return `${ORCHESTRATOR_HINT} (command substitution is not allowed)`;
-  if (/>|<</.test(bare)) return `${ORCHESTRATOR_HINT} (output redirection and here-documents are not allowed)`;
+  const writes = bare.replace(/&?\d*>&\d+|&?\d*>>?\s*\/dev\/null\b/g, "");
+  if (/>|<</.test(writes)) return `${ORCHESTRATOR_HINT} (output redirection and here-documents are not allowed)`;
   for (const segment of bare.split(/&&|\|\||[;|&\n]/)) {
-    const words = segment.trim().split(/\s+/).filter(Boolean);
-    const first = words[0];
-    if (first === undefined) continue;
-    if (!Object.hasOwn(ORCHESTRATOR_COMMANDS, first)) return `${ORCHESTRATOR_HINT} ("${first}" is not allowed)`;
-    if (words.includes("tee")) return `${ORCHESTRATOR_HINT} (tee is not allowed)`;
-    if (first === "rg" && words.some(word => word === "--pre" || word.startsWith("--pre="))) return `${ORCHESTRATOR_HINT} (rg --pre runs a program)`;
+    if (segment.trim().split(/\s+/)[0] === "tee") return `${ORCHESTRATOR_HINT} (tee is not allowed)`;
   }
   return undefined;
 }

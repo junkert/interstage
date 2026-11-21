@@ -42,8 +42,12 @@ import {
   saveMission,
   slugify,
   withMissionLock,
+  releaseBudgetHalt,
+  writeActiveMission,
   writeArtifact,
 } from "./state";
+
+type SettableStatus = Extract<MissionToolInput, { action: "set_status" }>["status"];
 
 export interface ExecOutput {
   stdout: string;
@@ -80,7 +84,7 @@ const EVENTS: Record<ItemEvent, true> = {
 };
 const KINDS: Record<ArtifactKind, true> = { evidence: true, research: true, specs: true, decisions: true, todo: true, spec: true };
 const SCOPES: Record<string, true> = { mission: true, items: true, item: true, approvals: true, budget: true };
-const STATUSES: Record<string, true> = { paused: true, running: true, complete: true, halted: true };
+const STATUSES: Record<SettableStatus, true> = { paused: true, running: true, complete: true, halted: true, aborted: true };
 const ACTIONS = Object.keys(ACTION_CALLERS) as MissionToolInput["action"][];
 
 const ok = (text: string, data?: unknown, next?: string): MissionToolResult => {
@@ -175,10 +179,10 @@ export function parseMissionInput(raw: Record<string, unknown>): { input: Missio
       return { input: { action, kind: raw.kind, name, content: raw.content, append: raw.append === true } };
     }
     case "set_status": {
-      if (typeof raw.status !== "string" || !Object.hasOwn(STATUSES, raw.status)) return missing("status (paused, running, complete or halted)");
+      if (typeof raw.status !== "string" || !Object.hasOwn(STATUSES, raw.status)) return missing("status (paused, running, complete, halted or aborted)");
       const reason = str(raw, "reason");
       if (reason === undefined) return missing("reason");
-      return { input: { action, status: raw.status as "paused" | "running" | "complete" | "halted", reason } };
+      return { input: { action, status: raw.status as SettableStatus, reason } };
     }
     case "apply_steering":
     case "reset_pogo_loop":
@@ -197,7 +201,8 @@ async function activeMission(deps: MissionDeps): Promise<Active | MissionToolRes
   if (id === undefined || id === "") return err("There is no active mission; houston must create one first.");
   const stateDir = requireStateDir(deps.env);
   const dir = missionDirOf(stateDir, id);
-  const mission = await loadMission(dir);
+  const { config } = await loadEffectiveConfig(stateDir, deps.env);
+  const mission = await releaseBudgetHalt(dir, config);
   if (mission === undefined) return err(`Mission ${id} has no mission.json under ${stateDir}.`);
   return { stateDir, dir, mission };
 }
@@ -264,12 +269,6 @@ async function dispatch(deps: MissionDeps, input: MissionToolInput): Promise<Mis
 async function createMission(deps: MissionDeps, input: Extract<MissionToolInput, { action: "create" }>): Promise<MissionToolResult> {
   const stateDir = requireStateDir(deps.env);
   const current = deps.env[ENV_MISSION_ID];
-  if (current !== undefined && current !== "") {
-    const existing = await loadMission(missionDirOf(stateDir, current));
-    if (existing !== undefined && existing.status !== "complete" && existing.status !== "aborted") {
-      return err(`Mission ${current} is still ${existing.status}; finish or abort it before creating another.`);
-    }
-  }
   const { config } = await loadEffectiveConfig(stateDir, deps.env);
   if (!config.lanes.enabled.includes(input.lane)) return err(`Lane ${input.lane} is not enabled; enabled lanes: ${config.lanes.enabled.join(", ")}.`);
 
@@ -309,8 +308,20 @@ async function createMission(deps: MissionDeps, input: Extract<MissionToolInput,
   };
   await saveMission(dir, mission);
   await mkdir(join(dir, "items"), { recursive: true });
+  // A mission that is still open does not block a new one: it is parked as paused (its state stays on disk) so the
+  // new request never needs the old one to be finished, aborted or hand-edited first.
+  let parked = "";
+  if (current !== undefined && current !== "") {
+    await withMissionLock(missionDirOf(stateDir, current), async () => {
+      const existing = await loadMission(missionDirOf(stateDir, current));
+      if (existing === undefined || existing.status !== "running") return;
+      await saveMission(missionDirOf(stateDir, current), { ...existing, status: "paused", statusReason: `superseded by ${id}` });
+      parked = ` ${current} was still running and is now paused (superseded).`;
+    });
+  }
   deps.env[ENV_MISSION_ID] = id;
-  return ok(`Mission ${id} created on branch ${branch} (base ${mission.baseBranch}).`, mission, "write the SPEC and TODO with write_artifact, then plan_set");
+  await writeActiveMission(stateDir, id);
+  return ok(`Mission ${id} created on branch ${branch} (base ${mission.baseBranch}).${parked}`, mission, "write the SPEC and TODO with write_artifact, then plan_set");
 }
 
 // -- plan_set ---------------------------------------------------------------------------------------------------
@@ -521,7 +532,7 @@ async function approval(deps: MissionDeps, active: Active, input: Extract<Missio
 
 // -- set_status -------------------------------------------------------------------------------------------------
 
-async function setStatus(deps: MissionDeps, active: Active, status: "paused" | "running" | "complete" | "halted", reason: string): Promise<MissionToolResult> {
+async function setStatus(deps: MissionDeps, active: Active, status: SettableStatus, reason: string): Promise<MissionToolResult> {
   return withMissionLock(active.dir, async () => {
     const mission = (await loadMission(active.dir)) ?? active.mission;
     if (mission.status === "complete" || mission.status === "aborted") return err(`Mission ${mission.id} is ${mission.status} and cannot change.`);
@@ -529,16 +540,18 @@ async function setStatus(deps: MissionDeps, active: Active, status: "paused" | "
     if (mission.status === "halted" && status !== "halted" && deps.caller !== "main") {
       return err(`Mission ${mission.id} was halted (${mission.statusReason ?? "no reason recorded"}); only CAPCOM can change its status.`);
     }
-    if (status === "complete") {
+    if (status === "aborted" && deps.caller === "flight") return err("flight cannot abort a mission; report it to houston or CAPCOM as an open question.");
+    // CAPCOM speaks for the user: it may close a mission whose remaining items are being dropped or were done elsewhere.
+    if (status === "complete" && deps.caller !== "main") {
       const items = await loadItems(active.dir);
       const open = items.filter(item => item.state !== "done");
       if (items.length === 0 || open.length > 0) {
         const what = items.length === 0 ? "the mission has no items" : `open items: ${open.map(item => `${item.id} (${item.state})`).join(", ")}`;
-        return err(`Mission ${mission.id} cannot be completed: ${what}. Finish every item, or drop unstarted ones with plan_set; if you cannot, pause the mission and report the open items to your orchestrator.`);
+        return err(`Mission ${mission.id} cannot be completed: ${what}. Finish every item, drop unstarted ones with plan_set, or set it to aborted with a reason; CAPCOM can also close it for the user.`);
       }
     }
     const resumed = mission.status === "halted" && status === "running";
-    const next: MissionRecord = { ...mission, status, statusReason: reason, breaker: resumed ? { consecutiveFailures: 0 } : mission.breaker };
+    const next: MissionRecord = { ...mission, status, statusReason: reason, haltCause: status === "halted" ? mission.haltCause : undefined, breaker: resumed ? { consecutiveFailures: 0 } : mission.breaker };
     await saveMission(active.dir, next);
     return ok(`Mission ${mission.id} is now ${status}${resumed ? "; the breaker count was reset" : ""}.`, { status, reason });
   });
@@ -570,7 +583,7 @@ export function missionParameters(z: ExtensionAPI["zod"]) {
     op: z.enum(["request", "resolve"]).optional(),
     gate: z.enum(["A", "B", "C", "D", "E", "F", "G"]).optional(),
     ref: z.string().optional(),
-    status: z.string().optional().describe("approval resolve: granted|denied; set_status: paused|running|complete|halted"),
+    status: z.string().optional().describe("approval resolve: granted|denied; set_status: paused|running|complete|halted|aborted"),
     signal: z.enum(Object.keys(SIGNALS) as [SteeringSignal, ...SteeringSignal[]]).optional(),
     payload: z.record(z.string(), z.unknown()).optional(),
     instructions: z.object({ primary: z.string(), constraints: strings, success_criteria: strings, next_steps: strings }).optional(),

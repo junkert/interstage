@@ -77,6 +77,8 @@ export interface MissionRecord {
   status: MissionStatus;
   /** Reason for the last status change (breaker trip, pause, abort). */
   statusReason: string | undefined;
+  /** Why the mission is `halted`: a budget halt clears itself once the budget allows more, a breaker halt needs CAPCOM. */
+  haltCause?: "budget" | "breaker";
   brief: string;
   branch: string;
   /** Branch that was current when the mission was created. */
@@ -145,7 +147,7 @@ export type MissionToolInput =
   | { action: "steer"; signal: SteeringSignal; payload: Record<string, unknown>; instructions?: SteeringPacket["instructions"] }
   | { action: "apply_steering" }
   | { action: "write_artifact"; kind: ArtifactKind; name: string; content: string; append?: boolean }
-  | { action: "set_status"; status: "paused" | "running" | "complete" | "halted"; reason: string }
+  | { action: "set_status"; status: "paused" | "running" | "complete" | "halted" | "aborted"; reason: string }
   | { action: "reset_pogo_loop" };
 
 export interface MissionToolResult {

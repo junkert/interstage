@@ -21,7 +21,7 @@ import {
   type ReviewFinding,
   type UsageRecord,
 } from "./contracts";
-import { parseUsageJsonl } from "./budget";
+import { checkBudgets, parseUsageJsonl } from "./budget";
 
 /** Failures at which an item leaves the retry loop. */
 export const MAX_FAILURES = 3;
@@ -143,7 +143,7 @@ export function applyEvent(ctx: ApplyContext, input: ApplyInput): ApplyResult {
     }
     if (outcome.tripped && mission.status === "running") {
       const reason = `circuit breaker: ${outcome.state.consecutiveFailures} consecutive failures`;
-      mission = { ...mission, status: "halted", statusReason: reason };
+      mission = { ...mission, status: "halted", statusReason: reason, haltCause: "breaker" };
       text += ` The circuit breaker tripped (${outcome.state.consecutiveFailures} consecutive failures): the mission is halted until CAPCOM resumes it.`;
     }
     return text;
@@ -471,15 +471,56 @@ export async function allocateMission(stateDir: string): Promise<{ id: string; d
   }
 }
 
-/** The newest mission that is not complete or aborted, used to resume after a restart. */
+/** File in the state directory naming the mission this project works on; survives restarts, unlike the environment. */
+const ACTIVE_FILE = "active-mission";
+
+export async function writeActiveMission(stateDir: string, id: string): Promise<void> {
+  await writeFileAtomic(join(stateDir, ACTIVE_FILE), `${id}\n`);
+}
+
+/**
+ * The mission to resume after a restart: the one the pointer file names (none when that mission is finished), else
+ * the newest mission that is not complete or aborted. An unreadable or corrupt mission.json must not stop activation:
+ * it is skipped (doctor reports it).
+ */
 export async function findActiveMission(stateDir: string): Promise<string | undefined> {
+  const pointed = (await readFile(join(stateDir, ACTIVE_FILE), "utf8").catch(() => "")).trim();
+  if (pointed !== "") {
+    const named = await loadMission(missionDirOf(stateDir, pointed)).catch(() => undefined);
+    if (named !== undefined) return named.status !== "complete" && named.status !== "aborted" ? pointed : undefined;
+  }
   const ids = await listMissionIds(stateDir);
   for (const id of ids.reverse()) {
-    // An unreadable or corrupt mission.json must not stop activation: skip it (doctor reports it).
     const mission = await loadMission(missionDirOf(stateDir, id)).catch(() => undefined);
     if (mission !== undefined && mission.status !== "complete" && mission.status !== "aborted") return id;
   }
   return undefined;
+}
+
+const BUDGET_HALT_PREFIX = "mission token budget exceeded";
+
+/** Missions halted before `haltCause` existed are recognised by their reason text. */
+export function haltCauseOf(mission: MissionRecord): "budget" | "breaker" | undefined {
+  if (mission.status !== "halted") return undefined;
+  if (mission.haltCause !== undefined) return mission.haltCause;
+  return mission.statusReason?.startsWith(BUDGET_HALT_PREFIX) === true ? "budget" : undefined;
+}
+
+/**
+ * A budget halt is not a verdict: when the user raises the budget (or the usage no longer exceeds it) the mission runs
+ * again without anyone editing mission.json. Returns the mission as it is afterwards.
+ */
+export async function releaseBudgetHalt(missionDir: string, config: InterstageConfig): Promise<MissionRecord | undefined> {
+  const peek = await loadMission(missionDir);
+  if (peek === undefined || haltCauseOf(peek) !== "budget") return peek;
+  if (checkBudgets(await loadUsage(join(missionDir, "usage.jsonl")), config.budgets, peek.pogoLoop).missionExceeded) return peek;
+  return withMissionLock(missionDir, async () => {
+    const fresh = await loadMission(missionDir);
+    if (fresh === undefined || haltCauseOf(fresh) !== "budget") return fresh;
+    const next: MissionRecord = { ...fresh, status: "running", statusReason: "the mission token budget allows more again; resumed automatically", haltCause: undefined };
+    await saveMission(missionDir, next);
+    return next;
+  });
 }
 
 export function slugify(title: string): string {
