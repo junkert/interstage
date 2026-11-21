@@ -7,7 +7,8 @@ import { DEFAULT_CONFIG } from "./config";
 import { ENV_MISSION_ID, ENV_STATE_DIR, MISSION_TOOL_AGENTS, type Approval, type InterstageConfig, type MissionRecord, type UsageRecord } from "./contracts";
 import { recordMerge, recordSpawn, taskSpawnProblem } from "./credits";
 import { blockReason, classifyCommand, decideGate, hasApproval, normalizeCommand, orchestratorBashProblem } from "./gates";
-import { appendUsage, isoNow, loadApprovals, loadEffectiveConfig, loadMission, loadUsage, missionDirOf, saveMission, withMissionLock } from "./state";
+import { appendUsage, isoNow, loadApprovals, loadEffectiveConfig, loadMission, loadUsage, missionDirOf, releaseBudgetHalt, saveMission, withMissionLock } from "./state";
+import { stateSnapshot } from "./snapshot";
 import { join } from "node:path";
 
 export interface HookCtx {
@@ -25,24 +26,6 @@ export interface HookDeps {
 
 const TOOL = "mission";
 
-/** CAPCOM may not change the project: these tools are blocked for the main session while Interstage is active. */
-const CAPCOM_BLOCKED_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: true, eval: true, debug: true };
-
-/**
- * The one command CAPCOM may run: `bash|sh <path>/chunk-conversation.sh <args>`. The whole command must match and
- * neither the path nor the arguments may contain shell metacharacters, so appended comments, `;`, `&&`, pipes,
- * redirects, substitutions and newlines cannot smuggle a second command in.
- */
-const CHUNKER_COMMAND = /^\s*(?:bash|sh)\s+[^\s;&|<>`$()#\\]*chunk-conversation\.sh(?:\s+[^;&|<>`$()#\\\r\n]*)?$/;
-
-function capcomLimit(event: { toolName: string; input: object }): { block: true; reason: string } | undefined {
-  const handoff = "CAPCOM never changes the project itself: spawn houston with the request instead, or run plain omp without --interstage.";
-  if (CAPCOM_BLOCKED_TOOLS[event.toolName]) return { block: true, reason: `${event.toolName} is blocked for CAPCOM. ${handoff}` };
-  if (event.toolName !== "bash") return undefined;
-  const command = "command" in event.input ? event.input.command : undefined;
-  if (typeof command === "string" && CHUNKER_COMMAND.test(command)) return undefined;
-  return { block: true, reason: `bash is blocked for CAPCOM except the import chunker script. ${handoff}` };
-}
 
 function callerName(ctx: HookCtx): string {
   return ctx.agent.kind === "main" ? "main" : ctx.agent.name;
@@ -83,27 +66,29 @@ export function createHooks(deps: HookDeps) {
           }
           return undefined;
         }
-        return { systemPrompt: [...event.systemPrompt, persona.text] };
+        const snapshot = await stateSnapshot(env);
+        return { systemPrompt: snapshot === undefined ? [...event.systemPrompt, persona.text] : [...event.systemPrompt, persona.text, snapshot] };
       } catch (error) {
         logFailure("before_agent_start", error);
         return undefined;
       }
     },
 
-    /** CAPCOM spawns only houston. Pure and synchronous: the spawner's context says who is asking. */
-    capcomSpawn(event: { agent: string }, ctx: HookCtx): { block: true; reason: string } | undefined {
-      if (ctx.agent.kind !== "main" || !runtime.active || event.agent === "houston") return undefined;
-      return { block: true, reason: `CAPCOM spawns only houston, and you asked for "${event.agent}". Call task again with agent set to "houston".` };
-    },
-
+    /**
+     * A paused or halted mission stops the build loop, not the conversation: houston is always allowed to start (it reads
+     * the state, reports and stops by its own rules), because CAPCOM could otherwise never hand it the decision that
+     * clears the stop. A halt caused by the budget lifts itself once the budget allows more.
+     */
     async beforeSubagentSpawn(event: { agent: string }): Promise<{ block: true; reason: string } | undefined> {
       try {
-        const current = await currentMission(env);
-        if (current === undefined) return undefined;
+        const found = await currentMission(env);
+        if (found === undefined) return undefined;
+        const { config: effective } = await loadEffectiveConfig(env[ENV_STATE_DIR] ?? "", env);
+        const current = { dir: found.dir, mission: (await releaseBudgetHalt(found.dir, effective)) ?? found.mission };
         const { mission } = current;
         const label = `Mission ${mission.id}`;
         const why = mission.statusReason === undefined ? "" : ` (${mission.statusReason})`;
-        if (mission.status === "paused" || mission.status === "halted") {
+        if ((mission.status === "paused" || mission.status === "halted") && event.agent !== "houston") {
           return { block: true, reason: `${label} is ${mission.status}${why}, so no new agents start until CAPCOM resumes it.` };
         }
         if ((mission.status === "complete" || mission.status === "aborted") && event.agent !== "houston") {
@@ -127,7 +112,7 @@ export function createHooks(deps: HookDeps) {
     },
 
     async toolCall(event: { toolName: string; input: object }, ctx: HookCtx): Promise<{ block: true; reason: string } | undefined> {
-      if (ctx.agent.kind === "main") return runtime.active ? capcomLimit(event) : undefined;
+      if (ctx.agent.kind === "main") return undefined;
       if (event.toolName === "task" && (ctx.agent.name === "flight" || ctx.agent.name === "houston")) {
         const problem = taskSpawnProblem(event.input);
         return problem === undefined ? undefined : { block: true, reason: problem };
@@ -229,7 +214,7 @@ export function createHooks(deps: HookDeps) {
         const halted = await withMissionLock(current.dir, async () => {
           const fresh = await loadMission(current.dir);
           if (fresh === undefined || fresh.status !== "running") return false;
-          await saveMission(current.dir, { ...fresh, status: "halted", statusReason: reason });
+          await saveMission(current.dir, { ...fresh, status: "halted", statusReason: reason, haltCause: budget.missionExceeded ? "budget" : "breaker" });
           return true;
         });
         if (halted) ctx.ui.notify(`Mission ${current.mission.id} halted: ${reason}.`, "warning");
@@ -248,7 +233,7 @@ export function registerHooks(pi: ExtensionAPI, runtime: Runtime): void {
     setActiveTools: names => pi.setActiveTools(names),
   });
   pi.on("before_agent_start", (event, ctx) => hooks.beforeAgentStart(event, ctx));
-  pi.on("before_subagent_spawn", async (event, ctx) => hooks.capcomSpawn(event, ctx) ?? (await hooks.beforeSubagentSpawn(event)));
+  pi.on("before_subagent_spawn", (event) => hooks.beforeSubagentSpawn(event));
   pi.on("tool_call", (event, ctx) => hooks.toolCall(event, ctx));
   pi.on("message_end", (event, ctx) => hooks.messageEnd(event, ctx));
 }

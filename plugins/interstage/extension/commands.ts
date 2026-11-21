@@ -236,6 +236,42 @@ export async function runAbort(c: CommandEnv): Promise<void> {
   );
 }
 
+// -- resume -----------------------------------------------------------------------------------------------------
+
+/** Moves a paused or halted mission back to running and returns the message that makes CAPCOM hand it to Houston. */
+export async function runResume(c: CommandEnv): Promise<string | undefined> {
+  const stateDir = c.env[ENV_STATE_DIR];
+  const id = c.env[ENV_MISSION_ID];
+  if (stateDir === undefined || stateDir === "" || id === undefined || id === "") {
+    c.ui.notify("There is no active mission to resume.", "warning");
+    return undefined;
+  }
+  const dir = missionDirOf(stateDir, id);
+  const mission = await loadMission(dir);
+  if (mission === undefined) {
+    c.ui.notify(`Mission ${id} has no mission.json under ${stateDir}.`, "error");
+    return undefined;
+  }
+  if (mission.status === "complete" || mission.status === "aborted") {
+    c.ui.notify(`Mission ${id} is ${mission.status}; there is nothing to resume.`, "warning");
+    return undefined;
+  }
+  const { config } = await loadEffectiveConfig(stateDir, c.env);
+  const budget = checkBudgets(await loadUsage(join(dir, "usage.jsonl")), config.budgets, mission.pogoLoop);
+  if (budget.missionExceeded) {
+    c.ui.notify(`Mission ${id} has used ${budget.missionUsed} of ${config.budgets.missionTokens} billable tokens, so it would halt again at once. Raise budgets.missionTokens in your Interstage config; it resumes by itself afterwards.`, "warning");
+    return undefined;
+  }
+  if (mission.status !== "running") {
+    await withMissionLock(dir, async () => {
+      const fresh = (await loadMission(dir)) ?? mission;
+      await saveMission(dir, { ...fresh, status: "running", statusReason: "resumed by the user with /interstage:resume", haltCause: undefined, breaker: fresh.status === "halted" ? { consecutiveFailures: 0 } : fresh.breaker });
+    });
+  }
+  c.ui.notify(`Mission ${id} is running.`, "info");
+  return `Resume Interstage mission ${id}: spawn houston with the mission id and "resume". Houston continues at the first step that is not done.`;
+}
+
 // -- doctor -----------------------------------------------------------------------------------------------------
 
 interface ToolCheck {
@@ -426,6 +462,10 @@ export function registerCommands(pi: ExtensionAPI, runtime: Runtime): void {
   });
   register("status", "Show the active mission: state, items, budget and circuit breaker", runStatus);
   register("abort", "Abort the active mission and delete its branches (asks first)", runAbort);
+  register("resume", "Resume a paused or halted mission and have CAPCOM hand it back to Houston", async c => {
+    const prompt = await runResume(c);
+    if (prompt !== undefined) pi.sendUserMessage(prompt);
+  });
   register("doctor", "Check the environment for Interstage (read-only; installs nothing)", async (c, ctx) => {
     const report = await doctorReport({
       cwd: c.cwd,

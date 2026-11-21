@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ROLE_TIERS, doctorReport, gitignoreHasEntry, runAbort, runInit, runStatus, type CommandEnv } from "../../plugins/interstage/extension/commands";
-import { saveItem, saveMission } from "../../plugins/interstage/extension/state";
+import { ROLE_TIERS, doctorReport, gitignoreHasEntry, runAbort, runInit, runResume, runStatus, type CommandEnv } from "../../plugins/interstage/extension/commands";
+import { loadMission, saveItem, saveMission } from "../../plugins/interstage/extension/state";
 import { clock, usageLine, fakeUi, git, item, mission, realExec, sandbox, tempDir, tempRepo, type Sandbox } from "./support";
 
 type Ui = ReturnType<typeof fakeUi>;
@@ -132,6 +132,50 @@ describe("/interstage:status", () => {
     const none = fakeUi();
     await runStatus(envFor(sb, none));
     expect(none.notes[0]?.message).toContain("no mission");
+  });
+});
+
+describe("/interstage:resume", () => {
+  async function parked(sb: Sandbox, overrides: Parameters<typeof mission>[0], usage?: string) {
+    const dir = join(sb.stateDir, "missions", "M-001");
+    await mkdir(dir, { recursive: true });
+    await saveMission(dir, mission(overrides));
+    if (usage !== undefined) await writeFile(join(dir, "usage.jsonl"), usage);
+    return dir;
+  }
+
+  test("moves a halted mission back to running, resets the breaker and returns the hand-off message for CAPCOM", async () => {
+    const sb = await sandbox();
+    const dir = await parked(sb, { status: "halted", statusReason: "circuit breaker: 5 consecutive failures", haltCause: "breaker", breaker: { consecutiveFailures: 5 } });
+    const c = envFor(sb, fakeUi());
+    c.env.INTERSTAGE_MISSION_ID = "M-001";
+    const prompt = await runResume(c);
+    expect(prompt).toContain("spawn houston with the mission id");
+    expect(await loadMission(dir)).toMatchObject({ status: "running", breaker: { consecutiveFailures: 0 } });
+  });
+
+  test("refuses while the mission is still over its token budget, and leaves it halted", async () => {
+    const sb = await sandbox("budgets:\n  missionTokens: 100\n");
+    const dir = await parked(sb, { status: "halted", statusReason: "mission token budget exceeded (5000 of 100)", haltCause: "budget" }, usageLine("flight", 5000, { mission: "M-001", pogoLoop: 0 }));
+    const ui = fakeUi();
+    const c = envFor(sb, ui);
+    c.env.INTERSTAGE_MISSION_ID = "M-001";
+    expect(await runResume(c)).toBeUndefined();
+    expect(ui.notes[0]?.message).toContain("Raise budgets.missionTokens");
+    expect((await loadMission(dir))?.status).toBe("halted");
+  });
+
+  test("says so when there is nothing to resume", async () => {
+    const sb = await sandbox();
+    const none = fakeUi();
+    expect(await runResume(envFor(sb, none))).toBeUndefined();
+    expect(none.notes[0]?.message).toContain("no active mission");
+    await parked(sb, { status: "complete" });
+    const done = fakeUi();
+    const c = envFor(sb, done);
+    c.env.INTERSTAGE_MISSION_ID = "M-001";
+    expect(await runResume(c)).toBeUndefined();
+    expect(done.notes[0]?.message).toContain("nothing to resume");
   });
 });
 

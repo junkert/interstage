@@ -3,8 +3,8 @@ import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ACTION_CALLERS, type MissionToolInput } from "../../plugins/interstage/extension/contracts";
 import { executeMission, missionParameters, parseMissionInput, registerMissionTool, type MissionDeps } from "../../plugins/interstage/extension/tools";
-import { loadApprovals, loadItems, loadMission, saveItem } from "../../plugins/interstage/extension/state";
-import { CLOCK, BLOCKER, BUILD, VERIFY, commitWithSubject, merged, spawned, usageLine, clock, git, realExec, sandbox, tempDir, type Sandbox } from "./support";
+import { findActiveMission, loadApprovals, loadItems, loadMission, saveItem, saveMission } from "../../plugins/interstage/extension/state";
+import { CLOCK, BLOCKER, BUILD, VERIFY, commitWithSubject, merged, spawned, usageLine, clock, git, mission as missionRecord, realExec, sandbox, tempDir, type Sandbox } from "./support";
 
 const TODO = `# Plan
 
@@ -213,17 +213,14 @@ describe("create", () => {
     expect(result).toMatchObject({ ok: false, text: expect.stringContaining("not a git repository") });
   });
 
-  test("refuses while another mission is active, but allows a new one after it completes", async () => {
+  test("a still-running mission does not block a new one", async () => {
     const sb = await sandbox();
     const dir = await newMission(sb);
-    const second = await call(sb, "houston", { action: "create", title: "again", lane: "fast", brief: "b" });
-    expect(second).toMatchObject({ ok: false, text: expect.stringContaining("still running") });
-    await plan(sb);
-    for (const item of await loadItems(dir)) await saveItem(dir, { ...item, state: "done" });
-    expect((await call(sb, "main", { action: "set_status", status: "complete", reason: "done" })).ok).toBe(true);
     await git(sb.repo, "switch", "-q", "main");
-    expect((await call(sb, "houston", { action: "create", title: "again", lane: "fast", brief: "b" })).ok).toBe(true);
+    const second = await call(sb, "houston", { action: "create", title: "again", lane: "fast", brief: "b" });
+    expect(second.ok).toBe(true);
     expect(sb.env.INTERSTAGE_MISSION_ID).toBe("M-002");
+    expect((await loadMission(dir))?.status).toBe("paused");
   });
 
   test("a lane disabled in config is refused", async () => {
@@ -602,7 +599,7 @@ describe("process evidence (credits)", () => {
 });
 
 describe("set_status complete", () => {
-  const complete = (sb: Sandbox, caller = "main") => call(sb, caller, { action: "set_status", status: "complete", reason: "all done" });
+  const complete = (sb: Sandbox, caller = "houston") => call(sb, caller, { action: "set_status", status: "complete", reason: "all done" });
 
   test("is refused for a mission with no items", async () => {
     const sb = await sandbox();
@@ -623,7 +620,7 @@ describe("set_status complete", () => {
     expect(refused.text).toContain("T-002 (pending)");
     expect(refused.text).not.toContain("T-001");
     expect(refused.text).toContain("plan_set");
-    expect(refused.text).toContain("pause");
+    expect(refused.text).toContain("aborted");
     expect((await loadMission(dir))?.status).toBe("running");
   });
 
@@ -636,13 +633,72 @@ describe("set_status complete", () => {
     expect((await loadMission(dir))?.status).toBe("complete");
   });
 
-  test("a blocked item still keeps the mission from completing; pausing is unaffected", async () => {
+  test("a blocked item still keeps houston from completing the mission; pausing is unaffected", async () => {
     const sb = await sandbox();
     const dir = await newMission(sb);
     await plan(sb);
     for (const item of await loadItems(dir)) await saveItem(dir, { ...item, state: item.id === "T-001" ? "done" : "blocked" });
     expect((await complete(sb)).text).toContain("T-002 (blocked)");
     expect((await call(sb, "flight", { action: "set_status", status: "paused", reason: "report" })).ok).toBe(true);
+  });
+});
+
+describe("closing and parking missions", () => {
+  const setStatus = (sb: Sandbox, caller: string, status: "complete" | "aborted" | "paused" | "running", reason = "because") => call(sb, caller, { action: "set_status", status, reason });
+
+  test("CAPCOM may close a mission with open items as complete or aborted; houston may abort but flight may not", async () => {
+    const sb = await sandbox();
+    const dir = await newMission(sb);
+    await plan(sb);
+    expect(await setStatus(sb, "flight", "aborted")).toMatchObject({ ok: false, text: expect.stringContaining("cannot abort") });
+    expect((await setStatus(sb, "houston", "complete")).ok).toBe(false);
+    expect((await setStatus(sb, "main", "complete", "work shipped as 43e3021")).ok).toBe(true);
+    expect(await loadMission(dir)).toMatchObject({ status: "complete", statusReason: "work shipped as 43e3021" });
+    const other = await sandbox();
+    const otherDir = await newMission(other);
+    expect((await setStatus(other, "houston", "aborted", "stale")).ok).toBe(true);
+    expect((await loadMission(otherDir))?.status).toBe("aborted");
+  });
+
+  test("create parks a still-running mission as paused, moves the pointer, and records it for restarts", async () => {
+    const sb = await sandbox();
+    const first = await newMission(sb);
+    await git(sb.repo, "switch", "-q", "main");
+    const second = await call(sb, "houston", { action: "create", title: "next request", lane: "fast", brief: "b" });
+    expect(second.ok).toBe(true);
+    expect(second.text).toContain("M-001 was still running and is now paused");
+    expect(await loadMission(first)).toMatchObject({ status: "paused", statusReason: "superseded by M-002" });
+    expect(sb.env.INTERSTAGE_MISSION_ID).toBe("M-002");
+    expect(await findActiveMission(sb.stateDir)).toBe("M-002");
+  });
+
+  test("a finished mission named by the pointer means no active mission, even when an older one is still parked", async () => {
+    const sb = await sandbox();
+    await newMission(sb);
+    await git(sb.repo, "switch", "-q", "main");
+    await call(sb, "houston", { action: "create", title: "next request", lane: "fast", brief: "b" });
+    expect((await call(sb, "main", { action: "set_status", status: "aborted", reason: "dropped" })).ok).toBe(true);
+    expect(await findActiveMission(sb.stateDir)).toBeUndefined();
+  });
+
+  test("a halt caused by the token budget lifts itself once the budget allows the usage, and a breaker halt does not", async () => {
+    const sb = await sandbox("budgets:\n  missionTokens: 100\n");
+    const dir = await newMission(sb);
+    await writeFile(join(dir, "usage.jsonl"), usageLine("flight", 5000, { mission: "M-001", pogoLoop: 0 }));
+    await saveMission(dir, missionRecord({ status: "halted", statusReason: "mission token budget exceeded (5000 of 100)", haltCause: "budget" }));
+    expect((await call(sb, "main", { action: "get", scope: "mission" })).text).toContain("is halted");
+    await writeFile(join(sb.stateDir, "config.yml"), "budgets:\n  missionTokens: 10000000\n");
+    expect((await call(sb, "houston", { action: "get", scope: "mission" })).text).toContain("is running");
+    expect((await loadMission(dir))?.status).toBe("running");
+    await saveMission(dir, missionRecord({ status: "halted", statusReason: "circuit breaker: 5 consecutive failures", haltCause: "breaker" }));
+    expect((await call(sb, "houston", { action: "get", scope: "mission" })).text).toContain("is halted");
+  });
+
+  test("a budget halt written before haltCause existed is recognised by its reason", async () => {
+    const sb = await sandbox("budgets:\n  missionTokens: 10000000\n");
+    const dir = await newMission(sb);
+    await saveMission(dir, missionRecord({ status: "halted", statusReason: "mission token budget exceeded (2005471 of 2000000)" }));
+    expect((await call(sb, "main", { action: "get", scope: "mission" })).text).toContain("is running");
   });
 });
 

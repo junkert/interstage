@@ -8,7 +8,7 @@ This page describes what exists in the repository today. Where behavior was not 
 you <-> CAPCOM (main session) -> Houston (project) -> Flight (mission) -> specialists
 ```
 
-CAPCOM is the only agent that talks to you. While Interstage is active it cannot edit or write files or run `eval`, `debug` or `ast_edit`, and its `bash` is limited to the import chunker script. It can spawn only `houston`. Specialists have no `ask` tool; their open questions travel up through Flight and Houston to CAPCOM, who asks you.
+CAPCOM is the only agent that talks to you. It delegates project work to Houston by default but is not locked out of anything: when you tell it to do something itself, it does. At the start of every turn it is shown the mission state read from disk. Specialists have no `ask` tool; their open questions travel up through Flight and Houston to CAPCOM, who asks you.
 
 ## Starting a session
 
@@ -64,6 +64,7 @@ Commands registered by the extension:
 |---|---|
 | `/interstage:init` | Creates `<project>/.interstage/`. Offers to append `.interstage/` to the project `.gitignore` (asks first, never commits). Lists your authenticated models and asks for a strong, a balanced and a fast model, then writes these `modelRoles`: `capcom`, `orchestrator`, `planner`, `reviewer` = strong; `coder` = balanced; `scout` = fast. Writes the user config file with the defaults unless one already exists. Cancelling the model questions changes no roles. Safe to run again. |
 | `/interstage:launch` | Turns the current session into an Interstage session. |
+| `/interstage:resume` | Moves the active mission from `paused` or `halted` back to `running` (resets the breaker count) and asks CAPCOM to hand it to Houston. Refuses while the mission is over its token budget. |
 | `/interstage:status` | Shows the active mission: status and reason, lane, autonomy, branch, item states, token use against both budgets, breaker count and pending approvals. |
 | `/interstage:abort` | Aborts the active mission. Refuses if the working tree has uncommitted tracked changes. Asks for confirmation, then checks out the mission's base branch and deletes the mission branch and any `omp/task/<TODO-ID>` branches of its items, and marks the mission `aborted`. |
 | `/interstage:doctor` | Read-only environment report; see [Troubleshooting](#troubleshooting). |
@@ -132,13 +133,13 @@ Each TODO item has one of the states `pending`, `building`, `verifying`, `integr
 
 You steer through CAPCOM, never by editing a build session. CAPCOM decides which artifact owns the problem (the spec, the TODO, or one assignment) and writes a steering packet with the `mission` tool. Signals: `interrupt`, `redirect`, `pause`, `resume`, `reprioritize`, `decision` (plus `error` and `complete` in the type). Flight applies pending packets between items, interrupt and pause first, then in sequence order; the running item finishes first. Packets move to `steering/applied/` when applied.
 
-While a mission is `paused` or `halted`, the extension blocks every new subagent spawn with a message saying so; items already running finish. To pause or interrupt, CAPCOM sets the status to `paused` with a reason. To continue it sets the status back to `running`, sends a `resume` packet and resumes Houston. A `halted` mission can only be resumed by CAPCOM, after you choose how to proceed.
+While a mission is `paused` or `halted`, the extension blocks every new subagent spawn except `houston` with a message saying so; items already running finish. Houston may always start, so CAPCOM can hand it the decision that clears the stop; Houston reports and stops by its own rules. To pause or interrupt, CAPCOM sets the status to `paused` with a reason. To continue it sets the status back to `running`, sends a `resume` packet and resumes Houston, or you run `/interstage:resume`. A `halted` mission can only be resumed by CAPCOM or by you, after you choose how to proceed. Creating a new mission parks a still-running one as `paused`.
 
 ## Budgets and the circuit breaker
 
 - Every assistant message in every session (CAPCOM and subagents) appends a usage record to the mission's `usage.jsonl`, or to `usage.jsonl` in the state directory outside a mission.
 - Budgets count billable tokens: `input + output + cacheWrite` per record. Cache reads are excluded, because every turn re-reads the whole conversation from the cache and counting them would measure conversation length rather than work done. `totalTokens` and `cacheRead` stay in each record, and `/interstage:status` and `mission get budget` show cache reads as a separate figure.
-- `budgets.missionTokens` caps the mission total. When the total goes over it the mission is set to `halted` and you are notified.
+- `budgets.missionTokens` caps the mission total. When the total goes over it the mission is set to `halted` and you are notified. Raise the budget in your config and the mission runs again by itself at the next spawn or `mission` call; `/interstage:resume` does it at once.
 - `budgets.pogoLoopTokens` caps Pogo's tokens within the current Pogo loop. Over the cap, new `pogo` spawns are blocked until Houston resets the loop; the escalation reaches you through CAPCOM.
 - Gate G, `breaker.consecutiveFailures`: each failed build or failed verification adds one to a consecutive count, and a verified, integrated item resets it. When the count reaches the limit the mission is `halted`, even in autopilot. CAPCOM explains from the failure history and offers options: revise the plan, change scope, raise a budget in config, or abort.
 
@@ -174,9 +175,7 @@ Block reasons come from the extension. The reason text is returned to the agent 
 | Reason | Cause |
 |---|---|
 | `Gate <D\|E\|F> blocks this <install\|network\|merge\|ship> command (<command>): do not retry it, and report the need to your orchestrator as an open question.` | A subagent ran a bash command in a gated class while the autonomy level required approval and no matching granted approval exists. Grant it through CAPCOM, or change autonomy or `ship` in config. |
-| `<tool> is blocked for CAPCOM. ...` or `bash is blocked for CAPCOM except the import chunker script. ...` | CAPCOM tried to change the project. It hands the work to Houston instead; for work you want to do yourself, use plain `omp` without `--interstage`. |
-| `CAPCOM spawns only houston, and you asked for "<agent>". ...` | CAPCOM tried to spawn another agent. |
-| `Mission <id> is paused\|halted (...), so no new agents start until CAPCOM resumes it.` | See Pause and Budgets above. |
+| `Mission <id> is paused\|halted (...), so no new agents start until CAPCOM resumes it.` | See Pause and Budgets above. Houston is exempt, so CAPCOM can always hand it the decision that clears the stop. |
 | `Mission <id> is complete\|aborted, so no new agents start; houston must create a new mission first.` | The mission is finished. |
 | `Pogo loop <n> used <x> of <y> tokens, so houston must reset the Pogo loop before spawning pogo again.` | The Pogo loop budget is spent. |
 

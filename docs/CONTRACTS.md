@@ -95,8 +95,8 @@ Process evidence (a real run on a small model showed Flight skipping verifier sp
 - `integrate_ok` requires a recorded `git merge ... omp/task/<ID>` (any `-N` suffix) for that item dated after its latest `builder_done`, and that `commit` names a commit that exists, whose subject starts with `<ID>: `.
 - A transition that lacks a credit is an error that names the missing spawn or merge and says to spawn the agent or run the merge.
 - A `task` call by `flight` or `houston` that spawns an executor agent must set `isolated: true` (on the item or at the top level) and name the item exactly `<TODO-ID>`; otherwise the hook blocks it (observed: builders run in the shared checkout, in parallel, with no task branch).
-- `set_status complete` requires at least one item and every item `done`; the error lists the open items.
-- Flight and Houston may run bash for read-only inspection and git only (allowlist in section 4); they cannot create or modify project files through bash.
+- `set_status complete` by `houston` or `flight` requires at least one item and every item `done`; the error lists the open items. `main` (CAPCOM, speaking for the user) may close any mission as `complete` or `aborted`.
+- Flight and Houston may run any bash command except file writes by redirect, here-document or `tee` (guard in section 4).
 
 ## 4. Gates
 
@@ -133,9 +133,9 @@ Hook command classification (case-sensitive regexes, applied to each `bash` comm
 
 Git patterns above tolerate global options between `git` and the subcommand (`git -C <dir> push`, `git -c k=v push`, `git --no-pager push`) and a quoted `git`; a hook that misses these is a bypass of gates E and F.
 
-Gates D, E and F apply only to sessions whose `ctx.agent.kind === "sub"`. The main session (CAPCOM) is restricted differently while Interstage is active: `edit`, `write`, `ast_edit`, `eval` and `debug` are blocked, `bash` is blocked except for the import chunker script (an exact command, no shell metacharacters), and `task` may spawn only `houston`. The block reason is a single sentence that names the gate and tells the agent to report the need to its orchestrator as an open question.
+Gates D, E and F apply only to sessions whose `ctx.agent.kind === "sub"`. The main session (CAPCOM) has no tool or bash restriction; its persona asks it to delegate project work to Houston by default and to do what the user directly tells it to. The block reason for a gate is a single sentence that names the gate and tells the agent to report the need to its orchestrator as an open question.
 
-Flight and Houston bash allowlist: every simple command (split on `&&`, `||`, `;`, `|` and newlines, after removing quoted strings for the check) starts with `git`, `ls`, `cat`, `pwd`, `echo`, `head`, `tail`, `wc`, `test`, `true`, `grep`, `rg` or `cd`, and the whole command contains no output redirection (`>`, `>>`, `<<` outside quotes) and no `tee`. `git` itself is limited by gates D, E and F. Anything else is blocked with a reason that says Flight and Houston delegate file changes and test runs to builders and verifiers.
+Flight and Houston bash guard: any program may run. The one refusal is writing files through shell redirection (`>`, `>>`, `<<` outside quotes; `2>&1` and `>/dev/null` pass) or `tee`, plus command substitution inside double quotes (it would hide a redirect). `git` itself is limited by gates D, E and F. The reason says Flight and Houston delegate file changes to builders.
 
 ## 5. The `mission` tool
 
@@ -143,7 +143,7 @@ One extension-registered tool named `mission`. Visible to the main session (CAPC
 
 | `action` | Parameters | Allowed callers | Effect |
 |---|---|---|---|
-| `create` | `title`, `lane`, `brief` | houston | Creates `missions/<id>/`, `mission.json`, the branch `mission/<id>-<slug>`; exports `INTERSTAGE_MISSION_ID` |
+| `create` | `title`, `lane`, `brief` | houston | Creates `missions/<id>/`, `mission.json`, the branch `mission/<id>-<slug>`; exports `INTERSTAGE_MISSION_ID` and writes `<state dir>/active-mission`. A mission that is still `running` is parked as `paused` ("superseded by <id>") instead of blocking the new one |
 | `plan_set` | `todoPath?` (default `missions/<id>/TODO.md`) | houston, flight | Parses and validates the TODO, creates `items/*.json` for new items, and refreshes `title`, `depends`, `spec` and `done-when` of items in `pending`, `failed`, `planning` or `blocked` while keeping their counters and history. An existing item that is no longer in the TODO is removed if it is in `pending`, `failed`, `planning` or `blocked`; if it is `building`, `verifying`, `integrating` or `done` it is kept and reported as skipped. Items that are `building`, `verifying`, `integrating` or `done` are never changed. Requests gate B when required |
 | `get` | `scope`: `mission` \| `items` \| `item` \| `approvals` \| `budget`; `itemId?` | main, houston, flight | Read state. `budget` returns used and remaining tokens and breaker state |
 | `transition` | `itemId`, `event`, `findings?`, `commit?`, `note?` | flight; houston (fast lane only, where Houston plays Flight) | Applies an event from section 3 and returns the new state and the recommended next action |
@@ -151,7 +151,7 @@ One extension-registered tool named `mission`. Visible to the main session (CAPC
 | `steer` | `signal`; `payload` | main, houston, flight | Writes a steering packet (`<seq>-<signal>.json`) |
 | `apply_steering` | none | flight | Returns pending packets in `seq` order (interrupt and pause first), moves them to `applied/` |
 | `write_artifact` | `kind`: `evidence` \| `research` \| `specs` \| `decisions` \| `todo` \| `spec`; `name`; `content`; `append?` | houston, flight | Writes a file under the mission directory. `name` is a relative path without `..`; `decisions` appends to `decisions.md` |
-| `set_status` | `status`: `paused` \| `running` \| `complete` \| `halted`; `reason` | main, houston, flight | Mission status. `halted` by the breaker can only be cleared by `main` |
+| `set_status` | `status`: `paused` \| `running` \| `complete` \| `halted` \| `aborted`; `reason` | main, houston, flight (`aborted`: main, houston) | Mission status. `halted` by the breaker can only be cleared by `main`; a budget halt lifts itself when the budget allows more. `main` may complete a mission whose items are not all done |
 | `reset_pogo_loop` | none | houston | Increments `pogoLoop`, which starts a fresh Pogo token budget |
 
 ## 6. Steering packets
